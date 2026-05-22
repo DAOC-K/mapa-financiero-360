@@ -1,65 +1,184 @@
-import Image from "next/image";
+const stats = [
+  {
+    title: "Ingresos del mes",
+    value: "$4.000.000",
+    detail: "Salario, freelance y otros ingresos",
+  },
+  {
+    title: "Gastos del mes",
+    value: "$2.700.000",
+    detail: "Fijos y variables registrados",
+  },
+  {
+    title: "Disponible",
+    value: "$1.300.000",
+    detail: "Dinero libre para decidir",
+  },
+  {
+    title: "Metas activas",
+    value: "3",
+    detail: "Viaje, emergencia e inversión",
+  },
+];
+
+const mapItems = [
+  "Gastos fijos",
+  "Gastos variables",
+  "Ahorro",
+  "Metas",
+  "Disponible",
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-screen bg-slate-950 text-white">
+      <section className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8">
+        <nav className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-emerald-400">
+              Mapa Financiero 360
+            </p>
+            <h1 className="text-2xl font-bold tracking-tight">
+              Panel financiero personal y compartido
+            </h1>
+          </div>
+
+          <button className="rounded-full bg-emerald-400 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300">
+            Crear mapa
+          </button>
+        </nav>
+
+        <div className="mt-10 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl">
+            <p className="text-sm font-medium text-slate-400">
+              Resumen del mes
+            </p>
+
+            <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-4xl font-bold">
+                  Toma mejores decisiones con tu dinero
+                </h2>
+                <p className="mt-3 max-w-2xl text-slate-300">
+                  Visualiza ingresos, gastos, metas y aportes compartidos en un
+                  solo mapa financiero. Ideal para personas, parejas o grupos
+                  que quieren organizar el mes con claridad.
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-emerald-400 p-5 text-slate-950">
+                <p className="text-sm font-semibold">Salud financiera</p>
+                <p className="mt-1 text-4xl font-black">78/100</p>
+              </div>
+            </div>
+
+            <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {stats.map((item) => (
+                <article
+                  key={item.title}
+                  className="rounded-2xl border border-white/10 bg-slate-900 p-5"
+                >
+                  <p className="text-sm text-slate-400">{item.title}</p>
+                  <p className="mt-2 text-2xl font-bold">{item.value}</p>
+                  <p className="mt-2 text-sm text-slate-500">{item.detail}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <aside className="rounded-3xl border border-white/10 bg-white/5 p-8">
+            <p className="text-sm font-medium text-slate-400">
+              Mapa compartido
+            </p>
+            <h3 className="mt-2 text-2xl font-bold">Dairo y pareja</h3>
+
+            <div className="mt-6 space-y-4">
+              <div className="rounded-2xl bg-slate-900 p-5">
+                <div className="flex justify-between text-sm text-slate-400">
+                  <span>Aporte Dairo</span>
+                  <span>60%</span>
+                </div>
+                <p className="mt-1 text-xl font-semibold">$1.500.000</p>
+              </div>
+
+              <div className="rounded-2xl bg-slate-900 p-5">
+                <div className="flex justify-between text-sm text-slate-400">
+                  <span>Aporte pareja</span>
+                  <span>40%</span>
+                </div>
+                <p className="mt-1 text-xl font-semibold">$1.000.000</p>
+              </div>
+
+              <div className="rounded-2xl border border-emerald-400/40 bg-emerald-400/10 p-5">
+                <p className="text-sm text-emerald-300">Total compartido</p>
+                <p className="mt-1 text-3xl font-bold">$2.500.000</p>
+              </div>
+            </div>
+          </aside>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+
+        <section className="mt-6 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-8">
+            <p className="text-sm font-medium text-slate-400">
+              Decisión del mes
+            </p>
+            <h3 className="mt-2 text-2xl font-bold">
+              ¿Qué hacemos con el disponible?
+            </h3>
+
+            <div className="mt-6 space-y-3">
+              <DecisionItem label="Fondo de emergencia" amount="$400.000" />
+              <DecisionItem label="Inversión" amount="$300.000" />
+              <DecisionItem label="Viaje" amount="$300.000" />
+              <DecisionItem label="Libre" amount="$300.000" />
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-8">
+            <p className="text-sm font-medium text-slate-400">
+              Mapa financiero visual
+            </p>
+            <h3 className="mt-2 text-2xl font-bold">
+              Así fluye tu dinero este mes
+            </h3>
+
+            <div className="mt-8 flex flex-col items-center gap-4">
+              <div className="rounded-2xl bg-emerald-400 px-8 py-4 text-center font-bold text-slate-950">
+                Ingresos
+                <p className="text-sm font-medium">$4.000.000</p>
+              </div>
+
+              <div className="h-8 w-px bg-white/20" />
+
+              <div className="grid w-full gap-4 md:grid-cols-5">
+                {mapItems.map((item) => (
+                  <div
+                    key={item}
+                    className="rounded-2xl border border-white/10 bg-slate-900 p-4 text-center text-sm font-semibold"
+                  >
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  );
+}
+
+function DecisionItem({
+  label,
+  amount,
+}: {
+  label: string;
+  amount: string;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl bg-slate-900 p-4">
+      <span className="text-slate-300">{label}</span>
+      <span className="font-bold text-emerald-300">{amount}</span>
     </div>
   );
 }
