@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import SimplePage from "@/components/SimplePage";
 
 type SpaceType = "Personal" | "Compartido";
@@ -12,6 +12,8 @@ type Goal = {
   targetAmount: number;
   space: SpaceType;
 };
+
+const STORAGE_KEY = "mapa-financiero-goals";
 
 const initialGoals: Goal[] = [
   {
@@ -51,11 +53,28 @@ function getProgress(currentAmount: number, targetAmount: number) {
 
 export default function GoalsPage() {
   const [goals, setGoals] = useState(initialGoals);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const [name, setName] = useState("");
   const [currentAmount, setCurrentAmount] = useState("");
   const [targetAmount, setTargetAmount] = useState("");
   const [space, setSpace] = useState<SpaceType>("Personal");
+
+  useEffect(() => {
+    const storedGoals = localStorage.getItem(STORAGE_KEY);
+
+    if (storedGoals) {
+      setGoals(JSON.parse(storedGoals));
+    }
+
+    setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(goals));
+  }, [goals, isLoaded]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -83,6 +102,14 @@ export default function GoalsPage() {
     setSpace("Personal");
   }
 
+  function removeGoal(id: number) {
+    setGoals((current) => current.filter((goal) => goal.id !== id));
+  }
+
+  function resetDemoData() {
+    setGoals(initialGoals);
+  }
+
   return (
     <SimplePage
       title="Metas"
@@ -92,7 +119,22 @@ export default function GoalsPage() {
         onSubmit={handleSubmit}
         className="rounded-3xl border border-white/10 bg-slate-900 p-6"
       >
-        <h2 className="text-2xl font-bold">Crear meta financiera</h2>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold">Crear meta financiera</h2>
+            <p className="mt-2 text-sm text-slate-400">
+              Las metas quedan guardadas en este navegador.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={resetDemoData}
+            className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+          >
+            Restaurar datos demo
+          </button>
+        </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <Field label="Nombre de la meta">
@@ -158,7 +200,7 @@ export default function GoalsPage() {
             >
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <h2 className="text-xl font-bold">{goal.name}</h2>
                     <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300">
                       {goal.space}
@@ -175,9 +217,19 @@ export default function GoalsPage() {
                   </p>
                 </div>
 
-                <span className="text-3xl font-black text-emerald-300">
-                  {progress}%
-                </span>
+                <div className="flex items-center gap-4">
+                  <span className="text-3xl font-black text-emerald-300">
+                    {progress}%
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => removeGoal(goal.id)}
+                    className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                  >
+                    Quitar
+                  </button>
+                </div>
               </div>
 
               <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-800">
