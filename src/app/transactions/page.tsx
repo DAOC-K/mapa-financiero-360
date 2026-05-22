@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import SimplePage from "@/components/SimplePage";
 
 type TransactionType = "Ingreso" | "Gasto";
@@ -16,6 +16,8 @@ type Transaction = {
   fixedType: FixedType;
   space: SpaceType;
 };
+
+const STORAGE_KEY = "mapa-financiero-transactions";
 
 const initialTransactions: Transaction[] = [
   {
@@ -64,6 +66,7 @@ const moneyFormatter = new Intl.NumberFormat("es-CO", {
 
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState(initialTransactions);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const [name, setName] = useState("");
   const [type, setType] = useState<TransactionType>("Gasto");
@@ -71,6 +74,22 @@ export default function TransactionsPage() {
   const [category, setCategory] = useState("");
   const [fixedType, setFixedType] = useState<FixedType>("Variable");
   const [space, setSpace] = useState<SpaceType>("Personal");
+
+  useEffect(() => {
+    const storedTransactions = localStorage.getItem(STORAGE_KEY);
+
+    if (storedTransactions) {
+      setTransactions(JSON.parse(storedTransactions));
+    }
+
+    setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions));
+  }, [transactions, isLoaded]);
 
   const totals = useMemo(() => {
     const income = transactions
@@ -117,6 +136,14 @@ export default function TransactionsPage() {
     setSpace("Personal");
   }
 
+  function removeTransaction(id: number) {
+    setTransactions((current) => current.filter((item) => item.id !== id));
+  }
+
+  function resetDemoData() {
+    setTransactions(initialTransactions);
+  }
+
   return (
     <SimplePage
       title="Movimientos"
@@ -132,7 +159,22 @@ export default function TransactionsPage() {
         onSubmit={handleSubmit}
         className="mt-8 rounded-3xl border border-white/10 bg-slate-900 p-6"
       >
-        <h2 className="text-2xl font-bold">Agregar movimiento</h2>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold">Agregar movimiento</h2>
+            <p className="mt-2 text-sm text-slate-400">
+              Ahora los movimientos quedan guardados en este navegador.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={resetDemoData}
+            className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+          >
+            Restaurar datos demo
+          </button>
+        </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Field label="Nombre">
@@ -216,6 +258,7 @@ export default function TransactionsPage() {
               <th className="p-4">Clasificación</th>
               <th className="p-4">Mapa</th>
               <th className="p-4 text-right">Monto</th>
+              <th className="p-4 text-right">Acción</th>
             </tr>
           </thead>
 
@@ -229,6 +272,15 @@ export default function TransactionsPage() {
                 <td className="p-4 text-slate-300">{item.space}</td>
                 <td className="p-4 text-right font-bold">
                   {moneyFormatter.format(item.amount)}
+                </td>
+                <td className="p-4 text-right">
+                  <button
+                    type="button"
+                    onClick={() => removeTransaction(item.id)}
+                    className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                  >
+                    Quitar
+                  </button>
                 </td>
               </tr>
             ))}
