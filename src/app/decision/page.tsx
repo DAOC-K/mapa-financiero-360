@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import SimplePage from "@/components/SimplePage";
 
 type DecisionType = "Ahorro" | "Inversión" | "Deuda" | "Meta" | "Libre";
@@ -11,6 +11,13 @@ type DecisionItem = {
   amount: number;
   type: DecisionType;
 };
+
+type DecisionStorage = {
+  availableAmount: number;
+  decisionItems: DecisionItem[];
+};
+
+const STORAGE_KEY = "mapa-financiero-decision";
 
 const initialDecisionItems: DecisionItem[] = [
   { id: 1, name: "Fondo de emergencia", amount: 400000, type: "Ahorro" },
@@ -28,10 +35,35 @@ const moneyFormatter = new Intl.NumberFormat("es-CO", {
 export default function DecisionPage() {
   const [availableAmount, setAvailableAmount] = useState(1300000);
   const [decisionItems, setDecisionItems] = useState(initialDecisionItems);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<DecisionType>("Ahorro");
+
+  useEffect(() => {
+    const storedDecision = localStorage.getItem(STORAGE_KEY);
+
+    if (storedDecision) {
+      const parsedDecision = JSON.parse(storedDecision) as DecisionStorage;
+
+      setAvailableAmount(parsedDecision.availableAmount);
+      setDecisionItems(parsedDecision.decisionItems);
+    }
+
+    setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    const decisionStorage: DecisionStorage = {
+      availableAmount,
+      decisionItems,
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(decisionStorage));
+  }, [availableAmount, decisionItems, isLoaded]);
 
   const totals = useMemo(() => {
     const distributed = decisionItems.reduce(
@@ -80,6 +112,11 @@ export default function DecisionPage() {
     setDecisionItems((current) => current.filter((item) => item.id !== id));
   }
 
+  function resetDemoData() {
+    setAvailableAmount(1300000);
+    setDecisionItems(initialDecisionItems);
+  }
+
   return (
     <SimplePage
       title="Decisión del mes"
@@ -107,11 +144,11 @@ export default function DecisionPage() {
             <h2 className="text-2xl font-bold">Disponible para decidir</h2>
             <p className="mt-2 text-sm text-slate-400">
               Cambia el monto disponible y reparte ese dinero según la decisión
-              financiera del mes.
+              financiera del mes. Esta decisión queda guardada en este navegador.
             </p>
           </div>
 
-          <div className="w-full md:w-72">
+          <div className="flex w-full flex-col gap-3 md:w-72">
             <label className="block">
               <span className="mb-2 block text-sm font-medium text-slate-400">
                 Monto disponible
@@ -126,6 +163,14 @@ export default function DecisionPage() {
                 className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
               />
             </label>
+
+            <button
+              type="button"
+              onClick={resetDemoData}
+              className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+            >
+              Restaurar datos demo
+            </button>
           </div>
         </div>
 
