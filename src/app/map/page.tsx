@@ -1,6 +1,81 @@
 ﻿"use client";
 
+import { useEffect, useMemo, useState } from "react";
 import SimplePage from "@/components/SimplePage";
+
+type Transaction = {
+  id: number;
+  name: string;
+  type: "Ingreso" | "Gasto";
+  amount: number;
+  category: string;
+  fixedType: "Fijo" | "Variable";
+  space: "Personal" | "Compartido";
+};
+
+type DecisionItem = {
+  id: number;
+  name: string;
+  amount: number;
+  type: "Ahorro" | "Inversión" | "Deuda" | "Meta" | "Libre";
+};
+
+type DecisionStorage = {
+  availableAmount: number;
+  decisionItems: DecisionItem[];
+};
+
+const TRANSACTIONS_KEY = "mapa-financiero-transactions";
+const DECISION_KEY = "mapa-financiero-decision";
+
+const initialTransactions: Transaction[] = [
+  {
+    id: 1,
+    name: "Salario",
+    type: "Ingreso",
+    amount: 4000000,
+    category: "Trabajo",
+    fixedType: "Fijo",
+    space: "Personal",
+  },
+  {
+    id: 2,
+    name: "Arriendo",
+    type: "Gasto",
+    amount: 1200000,
+    category: "Hogar",
+    fixedType: "Fijo",
+    space: "Compartido",
+  },
+  {
+    id: 3,
+    name: "Mercado",
+    type: "Gasto",
+    amount: 600000,
+    category: "Alimentación",
+    fixedType: "Variable",
+    space: "Compartido",
+  },
+  {
+    id: 4,
+    name: "Inversión mensual",
+    type: "Gasto",
+    amount: 800000,
+    category: "Inversión",
+    fixedType: "Fijo",
+    space: "Personal",
+  },
+];
+
+const initialDecision: DecisionStorage = {
+  availableAmount: 1300000,
+  decisionItems: [
+    { id: 1, name: "Fondo de emergencia", amount: 400000, type: "Ahorro" },
+    { id: 2, name: "Inversión mensual", amount: 300000, type: "Inversión" },
+    { id: 3, name: "Viaje", amount: 300000, type: "Meta" },
+    { id: 4, name: "Libre del mes", amount: 300000, type: "Libre" },
+  ],
+};
 
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -8,72 +83,138 @@ const moneyFormatter = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
-const flowData = {
-  income: 4000000,
-  fixedExpenses: 1800000,
-  variableExpenses: 900000,
-  savings: 400000,
-  investments: 300000,
-  goals: 300000,
-  free: 300000,
-};
-
-const nodes = [
-  {
-    title: "Gastos fijos",
-    amount: flowData.fixedExpenses,
-    description: "Arriendo, servicios, obligaciones mensuales.",
-  },
-  {
-    title: "Gastos variables",
-    amount: flowData.variableExpenses,
-    description: "Mercado, transporte, comida y otros consumos.",
-  },
-  {
-    title: "Ahorro",
-    amount: flowData.savings,
-    description: "Fondo de emergencia o reserva mensual.",
-  },
-  {
-    title: "Inversión",
-    amount: flowData.investments,
-    description: "Aportes a portafolio, Hapi, ETFs u otros activos.",
-  },
-  {
-    title: "Metas",
-    amount: flowData.goals,
-    description: "Viaje, computador, casa, moto o metas compartidas.",
-  },
-  {
-    title: "Libre",
-    amount: flowData.free,
-    description: "Dinero sin asignar o para uso flexible.",
-  },
-];
-
 export default function MapPage() {
-  const assigned = nodes.reduce((sum, item) => sum + item.amount, 0);
-  const difference = flowData.income - assigned;
+  const [transactions, setTransactions] = useState(initialTransactions);
+  const [decision, setDecision] = useState(initialDecision);
+
+  useEffect(() => {
+    const storedTransactions = localStorage.getItem(TRANSACTIONS_KEY);
+    const storedDecision = localStorage.getItem(DECISION_KEY);
+
+    if (storedTransactions) {
+      setTransactions(JSON.parse(storedTransactions));
+    }
+
+    if (storedDecision) {
+      setDecision(JSON.parse(storedDecision));
+    }
+  }, []);
+
+  const flow = useMemo(() => {
+    const income = transactions
+      .filter((item) => item.type === "Ingreso")
+      .reduce((sum, item) => sum + item.amount, 0);
+
+    const fixedExpenses = transactions
+      .filter((item) => item.type === "Gasto" && item.fixedType === "Fijo")
+      .reduce((sum, item) => sum + item.amount, 0);
+
+    const variableExpenses = transactions
+      .filter((item) => item.type === "Gasto" && item.fixedType === "Variable")
+      .reduce((sum, item) => sum + item.amount, 0);
+
+    const savings = decision.decisionItems
+      .filter((item) => item.type === "Ahorro")
+      .reduce((sum, item) => sum + item.amount, 0);
+
+    const investments = decision.decisionItems
+      .filter((item) => item.type === "Inversión")
+      .reduce((sum, item) => sum + item.amount, 0);
+
+    const goals = decision.decisionItems
+      .filter((item) => item.type === "Meta")
+      .reduce((sum, item) => sum + item.amount, 0);
+
+    const debt = decision.decisionItems
+      .filter((item) => item.type === "Deuda")
+      .reduce((sum, item) => sum + item.amount, 0);
+
+    const free = decision.decisionItems
+      .filter((item) => item.type === "Libre")
+      .reduce((sum, item) => sum + item.amount, 0);
+
+    const assigned =
+      fixedExpenses +
+      variableExpenses +
+      savings +
+      investments +
+      goals +
+      debt +
+      free;
+
+    const difference = income - assigned;
+
+    return {
+      income,
+      fixedExpenses,
+      variableExpenses,
+      savings,
+      investments,
+      goals,
+      debt,
+      free,
+      assigned,
+      difference,
+    };
+  }, [transactions, decision]);
+
+  const nodes = [
+    {
+      title: "Gastos fijos",
+      amount: flow.fixedExpenses,
+      description: "Arriendo, servicios, obligaciones mensuales.",
+    },
+    {
+      title: "Gastos variables",
+      amount: flow.variableExpenses,
+      description: "Mercado, transporte, comida y otros consumos.",
+    },
+    {
+      title: "Ahorro",
+      amount: flow.savings,
+      description: "Fondo de emergencia o reserva mensual.",
+    },
+    {
+      title: "Inversión",
+      amount: flow.investments,
+      description: "Aportes a portafolio, ETFs u otros activos.",
+    },
+    {
+      title: "Metas",
+      amount: flow.goals,
+      description: "Viaje, computador, casa, moto o metas compartidas.",
+    },
+    {
+      title: "Deudas",
+      amount: flow.debt,
+      description: "Pagos destinados a reducir obligaciones.",
+    },
+    {
+      title: "Libre",
+      amount: flow.free,
+      description: "Dinero sin asignar o para uso flexible.",
+    },
+  ];
 
   return (
     <SimplePage
       title="Mapa financiero visual"
-      description="Visualiza cómo fluye el dinero del mes desde tus ingresos hacia gastos, ahorro, inversión, metas y dinero libre."
+      description="Visualiza cómo fluye el dinero del mes usando los movimientos y decisiones que tienes guardados."
     >
       <section className="rounded-3xl border border-white/10 bg-slate-900 p-6">
         <div className="grid gap-4 md:grid-cols-3">
           <SummaryCard
             title="Ingresos"
-            value={moneyFormatter.format(flowData.income)}
+            value={moneyFormatter.format(flow.income)}
           />
           <SummaryCard
             title="Asignado"
-            value={moneyFormatter.format(assigned)}
+            value={moneyFormatter.format(flow.assigned)}
           />
           <SummaryCard
             title="Diferencia"
-            value={moneyFormatter.format(difference)}
-            warning={difference < 0}
+            value={moneyFormatter.format(flow.difference)}
+            warning={flow.difference < 0}
           />
         </div>
       </section>
@@ -85,17 +226,19 @@ export default function MapPage() {
               Ingresos del mes
             </p>
             <p className="mt-2 text-4xl font-black">
-              {moneyFormatter.format(flowData.income)}
+              {moneyFormatter.format(flow.income)}
             </p>
           </div>
 
           <div className="h-12 w-px bg-white/20" />
-
-          <div className="h-px w-full max-w-4xl bg-white/20" />
+          <div className="h-px w-full max-w-5xl bg-white/20" />
 
           <div className="grid w-full gap-4 pt-8 md:grid-cols-2 xl:grid-cols-3">
             {nodes.map((node) => {
-              const percentage = Math.round((node.amount / flowData.income) * 100);
+              const percentage =
+                flow.income > 0
+                  ? Math.min(Math.round((node.amount / flow.income) * 100), 100)
+                  : 0;
 
               return (
                 <article
@@ -138,17 +281,16 @@ export default function MapPage() {
         <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
           <h2 className="text-2xl font-bold">Lectura rápida</h2>
           <p className="mt-3 text-sm leading-6 text-slate-400">
-            Este mapa permite entender hacia dónde se va el dinero del mes.
-            Más adelante esta vista se alimentará automáticamente con los
-            movimientos reales registrados por el usuario.
+            Este mapa ya no es solo una maqueta: ahora toma datos de movimientos
+            y de la decisión del mes guardados en el navegador.
           </p>
         </article>
 
         <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-          <h2 className="text-2xl font-bold">Siguiente mejora</h2>
+          <h2 className="text-2xl font-bold">Prueba recomendada</h2>
           <p className="mt-3 text-sm leading-6 text-slate-400">
-            Después conectaremos este mapa con ingresos, gastos, metas y decisión
-            del mes para que los nodos cambien solos.
+            Agrega un gasto en Movimientos o una decisión nueva en Decisión del
+            mes y vuelve a esta pantalla para ver cómo cambia el flujo.
           </p>
         </article>
       </section>
