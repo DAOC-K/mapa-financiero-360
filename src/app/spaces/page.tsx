@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import SimplePage from "@/components/SimplePage";
 
 type SpaceType = "Personal" | "Compartido";
@@ -12,6 +12,8 @@ type Space = {
   amount: number;
   description: string;
 };
+
+const STORAGE_KEY = "mapa-financiero-spaces";
 
 const initialSpaces: Space[] = [
   {
@@ -38,11 +40,28 @@ const moneyFormatter = new Intl.NumberFormat("es-CO", {
 
 export default function SpacesPage() {
   const [spaces, setSpaces] = useState(initialSpaces);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const [name, setName] = useState("");
   const [type, setType] = useState<SpaceType>("Personal");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+
+  useEffect(() => {
+    const storedSpaces = localStorage.getItem(STORAGE_KEY);
+
+    if (storedSpaces) {
+      setSpaces(JSON.parse(storedSpaces));
+    }
+
+    setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(spaces));
+  }, [spaces, isLoaded]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -69,6 +88,14 @@ export default function SpacesPage() {
     setDescription("");
   }
 
+  function removeSpace(id: number) {
+    setSpaces((current) => current.filter((space) => space.id !== id));
+  }
+
+  function resetDemoData() {
+    setSpaces(initialSpaces);
+  }
+
   return (
     <SimplePage
       title="Mapas financieros"
@@ -78,7 +105,22 @@ export default function SpacesPage() {
         onSubmit={handleSubmit}
         className="rounded-3xl border border-white/10 bg-slate-900 p-6"
       >
-        <h2 className="text-2xl font-bold">Crear mapa financiero</h2>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold">Crear mapa financiero</h2>
+            <p className="mt-2 text-sm text-slate-400">
+              Los mapas quedan guardados en este navegador.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={resetDemoData}
+            className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+          >
+            Restaurar datos demo
+          </button>
+        </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <Field label="Nombre del mapa">
@@ -136,11 +178,21 @@ export default function SpacesPage() {
             key={space.id}
             className="rounded-3xl border border-white/10 bg-slate-900 p-6"
           >
-            <div className="flex items-center justify-between gap-4">
-              <h2 className="text-2xl font-bold">{space.name}</h2>
-              <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-sm font-semibold text-emerald-300">
-                {space.type}
-              </span>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold">{space.name}</h2>
+                <span className="mt-3 inline-flex rounded-full bg-emerald-400/10 px-3 py-1 text-sm font-semibold text-emerald-300">
+                  {space.type}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => removeSpace(space.id)}
+                className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:bg-white/10 hover:text-white"
+              >
+                Quitar
+              </button>
             </div>
 
             <p className="mt-4 text-3xl font-black">
