@@ -1,4 +1,6 @@
-﻿import Link from "next/link";
+﻿"use client";
+
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 const navItems = [
@@ -57,3 +59,4 @@ export default function SimplePage({
     </main>
   );
 }
+
