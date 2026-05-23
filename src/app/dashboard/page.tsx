@@ -64,27 +64,13 @@ const moneyFormatter = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
-function getDecisionTypeLabel(type: DecisionItem["type"]) {
-  const labels: Record<DecisionItem["type"], string> = {
-    saving: "Ahorro",
-    investment: "Inversión",
-    debt: "Deuda",
-    goal: "Meta",
-    free: "Libre",
-  };
-
-  return labels[type];
-}
-
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
 
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [monthlyDecisions, setMonthlyDecisions] = useState<MonthlyDecision[]>(
-    [],
-  );
+  const [monthlyDecisions, setMonthlyDecisions] = useState<MonthlyDecision[]>([]);
   const [decisionItems, setDecisionItems] = useState<DecisionItem[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -269,7 +255,7 @@ export default function DashboardPage() {
         </section>
       ) : (
         <div className="grid gap-6">
-          <section className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
               title="Ingresos del mes"
               value={moneyFormatter.format(summary.income)}
@@ -293,41 +279,36 @@ export default function DashboardPage() {
             />
           </section>
 
-          <section className="grid gap-6 2xl:grid-cols-[1fr_1fr]">
+          <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
             <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
               <p className="text-sm font-medium text-slate-400">
                 Mapas financieros
               </p>
-
-              <div className="mt-2 flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold">
-                    Presupuesto compartido
-                  </h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">
-                    Resumen de mapas creados, aportes compartidos y disponible
-                    real del mes.
-                  </p>
-                </div>
-              </div>
+              <h2 className="mt-2 text-2xl font-bold">
+                Presupuesto compartido
+              </h2>
 
               <div className="mt-6 grid gap-4 xl:grid-cols-3">
-                <MiniStatCard
-                  title="Mapas creados"
-                  value={String(summary.spacesCount)}
-                  description="Espacios activos"
-                />
-                <MiniStatCard
-                  title="Total compartido"
-                  value={moneyFormatter.format(summary.sharedBudget)}
-                  description="Presupuesto en mapas compartidos"
-                />
-                <MiniStatCard
-                  title="Disponible real"
-                  value={moneyFormatter.format(summary.available)}
-                  description="Ingresos menos gastos"
-                  highlighted
-                />
+                <div className="rounded-2xl bg-slate-950 p-5">
+                  <p className="text-sm text-slate-400">Mapas creados</p>
+                  <p className="mt-2 text-2xl font-bold">
+                    {summary.spacesCount}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-slate-950 p-5">
+                  <p className="text-sm text-slate-400">Total compartido</p>
+                  <p className="mt-2 text-2xl font-bold">
+                    {moneyFormatter.format(summary.sharedBudget)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-emerald-400/40 bg-emerald-400/10 p-5">
+                  <p className="text-sm text-emerald-300">Disponible real</p>
+                  <p className="mt-2 text-2xl font-bold">
+                    {moneyFormatter.format(summary.available)}
+                  </p>
+                </div>
               </div>
             </article>
 
@@ -335,7 +316,6 @@ export default function DashboardPage() {
               <p className="text-sm font-medium text-slate-400">
                 Salud financiera
               </p>
-
               <div className="mt-4 rounded-3xl bg-emerald-400 p-6 text-slate-950">
                 <p className="text-sm font-semibold">Puntaje estimado</p>
                 <p className="mt-1 text-5xl font-black">
@@ -349,7 +329,7 @@ export default function DashboardPage() {
             </article>
           </section>
 
-          <section className="grid gap-6 2xl:grid-cols-2">
+          <section className="grid gap-6 xl:grid-cols-2">
             <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
               <p className="text-sm font-medium text-slate-400">
                 Decisión del mes
@@ -359,7 +339,7 @@ export default function DashboardPage() {
               <div className="mt-6 grid gap-4 md:grid-cols-2">
                 <div className="rounded-2xl bg-slate-950 p-5">
                   <p className="text-sm text-slate-400">Distribuido</p>
-                  <p className="mt-2 break-words text-2xl font-bold">
+                  <p className="mt-2 text-2xl font-bold">
                     {moneyFormatter.format(summary.distributed)}
                   </p>
                 </div>
@@ -367,7 +347,7 @@ export default function DashboardPage() {
                 <div className="rounded-2xl bg-slate-950 p-5">
                   <p className="text-sm text-slate-400">Falta por asignar</p>
                   <p
-                    className={`mt-2 break-words text-2xl font-bold ${
+                    className={`mt-2 text-2xl font-bold ${
                       summary.decisionRemaining < 0
                         ? "text-red-300"
                         : "text-white"
@@ -387,16 +367,14 @@ export default function DashboardPage() {
                   latestDecisionItems.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between gap-4 rounded-2xl bg-slate-950 p-4"
+                      className="flex items-center justify-between rounded-2xl bg-slate-950 p-4"
                     >
                       <div>
                         <p className="font-semibold">{item.name}</p>
-                        <p className="text-xs text-slate-500">
-                          {getDecisionTypeLabel(item.type)}
-                        </p>
+                        <p className="text-xs text-slate-500">{item.type}</p>
                       </div>
 
-                      <span className="text-right font-bold text-emerald-300">
+                      <span className="font-bold text-emerald-300">
                         {moneyFormatter.format(Number(item.amount))}
                       </span>
                     </div>
@@ -431,7 +409,7 @@ export default function DashboardPage() {
             </article>
           </section>
 
-          <section className="grid gap-6 2xl:grid-cols-2">
+          <section className="grid gap-6 xl:grid-cols-2">
             <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
               <h2 className="text-2xl font-bold">Últimos movimientos</h2>
 
@@ -444,7 +422,7 @@ export default function DashboardPage() {
                   latestTransactions.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between gap-4 rounded-2xl bg-slate-950 p-4"
+                      className="flex items-center justify-between rounded-2xl bg-slate-950 p-4"
                     >
                       <div>
                         <p className="font-semibold">{item.name}</p>
@@ -454,7 +432,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
 
-                      <span className="text-right font-bold">
+                      <span className="font-bold">
                         {moneyFormatter.format(Number(item.amount))}
                       </span>
                     </div>
@@ -486,11 +464,8 @@ export default function DashboardPage() {
                         : 0;
 
                     return (
-                      <div
-                        key={goal.id}
-                        className="rounded-2xl bg-slate-950 p-4"
-                      >
-                        <div className="flex items-center justify-between gap-4">
+                      <div key={goal.id} className="rounded-2xl bg-slate-950 p-4">
+                        <div className="flex items-center justify-between">
                           <p className="font-semibold">{goal.name}</p>
                           <span className="font-bold text-emerald-300">
                             {progress}%
@@ -531,45 +506,13 @@ function SummaryCard({
     <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
       <p className="text-sm text-slate-400">{title}</p>
       <p
-        className={`mt-2 break-words text-3xl font-black leading-tight ${
+        className={`mt-2 text-3xl font-black ${
           warning ? "text-red-300" : "text-white"
         }`}
       >
         {value}
       </p>
       <p className="mt-3 text-sm leading-6 text-slate-500">{detail}</p>
-    </article>
-  );
-}
-
-function MiniStatCard({
-  title,
-  value,
-  description,
-  highlighted = false,
-}: {
-  title: string;
-  value: string;
-  description: string;
-  highlighted?: boolean;
-}) {
-  return (
-    <article
-      className={`rounded-3xl border p-5 ${
-        highlighted
-          ? "border-emerald-400/40 bg-emerald-400/10"
-          : "border-white/10 bg-slate-950"
-      }`}
-    >
-      <p className={highlighted ? "text-sm text-emerald-300" : "text-sm text-slate-400"}>
-        {title}
-      </p>
-
-      <p className="mt-3 break-words text-2xl font-black leading-tight text-white">
-        {value}
-      </p>
-
-      <p className="mt-2 text-xs leading-5 text-slate-500">{description}</p>
     </article>
   );
 }
@@ -588,9 +531,9 @@ function FlowBar({
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-4 text-sm">
+      <div className="flex items-center justify-between text-sm">
         <span className="text-slate-300">{title}</span>
-        <span className="text-right font-bold text-emerald-300">
+        <span className="font-bold text-emerald-300">
           {moneyFormatter.format(amount)}
         </span>
       </div>
