@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+﻿# Mapa Financiero 360
 
-## Getting Started
+Mapa Financiero 360 es una web app para organizar ingresos, gastos, metas, mapas financieros personales o compartidos y decisiones mensuales de dinero.
 
-First, run the development server:
+## Estado del proyecto
 
-```bash
+MVP inicial funcional.
+
+## Funciones actuales
+
+- Landing principal.
+- Registro de usuarios con Supabase Auth.
+- Login de usuarios con Supabase Auth.
+- Protección de páginas internas.
+- Cierre de sesión.
+- Perfil de usuario.
+- Creación de mapas financieros personales o compartidos.
+- Registro de ingresos y gastos.
+- Creación de metas financieras.
+- Decisión del mes para distribuir dinero disponible.
+- Dashboard financiero conectado a Supabase.
+- Mapa visual del flujo de dinero.
+- Base de datos con RLS activo.
+
+## Tecnologías
+
+- Next.js
+- TypeScript
+- Tailwind CSS
+- Supabase
+- PostgreSQL
+- Supabase Auth
+- Row Level Security
+
+## Variables de entorno
+
+Crear un archivo .env.local en la raíz del proyecto con:
+
+NEXT_PUBLIC_SUPABASE_URL=tu_url_de_supabase
+NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_key_publica_de_supabase
+
+## Ejecutar en local
+
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abrir:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+http://localhost:3000
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Build de producción
 
-## Learn More
+npm run build
 
-To learn more about Next.js, take a look at the following resources:
+## Próximas mejoras
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Invitar a otra persona a un mapa compartido.
+- Roles de miembros: owner/member.
+- Aportes proporcionales por ingresos.
+- Filtros por mes.
+- Reportes mensuales.
+- Exportar PDF o Excel.
+- Simulador financiero.
+- IA financiera más adelante.
+- Deploy en Vercel.
