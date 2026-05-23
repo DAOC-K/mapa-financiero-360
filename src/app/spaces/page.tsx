@@ -1,36 +1,20 @@
 ﻿"use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import SimplePage from "@/components/SimplePage";
+import { createClient } from "@/lib/supabase/client";
 
-type SpaceType = "Personal" | "Compartido";
+type SpaceType = "personal" | "shared";
 
 type Space = {
-  id: number;
+  id: string;
   name: string;
   type: SpaceType;
-  amount: number;
+  monthly_budget: number;
   description: string;
+  created_by: string;
+  created_at: string;
 };
-
-const STORAGE_KEY = "mapa-financiero-spaces";
-
-const initialSpaces: Space[] = [
-  {
-    id: 1,
-    name: "Mi mapa personal",
-    type: "Personal",
-    amount: 4000000,
-    description: "Ingresos, gastos, metas y dinero disponible individual.",
-  },
-  {
-    id: 2,
-    name: "Dairo y pareja",
-    type: "Compartido",
-    amount: 2500000,
-    description: "Aportes del hogar, gastos comunes y decisiones del mes.",
-  },
-];
 
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -38,62 +22,119 @@ const moneyFormatter = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
+function getSpaceTypeLabel(type: SpaceType) {
+  return type === "personal" ? "Personal" : "Compartido";
+}
+
 export default function SpacesPage() {
-  const [spaces, setSpaces] = useState(initialSpaces);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const supabase = useMemo(() => createClient(), []);
+
+  const [spaces, setSpaces] = useState<Space[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [name, setName] = useState("");
-  const [type, setType] = useState<SpaceType>("Personal");
+  const [type, setType] = useState<SpaceType>("personal");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
 
-  useEffect(() => {
-    const storedSpaces = localStorage.getItem(STORAGE_KEY);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState("");
 
-    if (storedSpaces) {
-      setSpaces(JSON.parse(storedSpaces));
+  useEffect(() => {
+    async function loadSpaces() {
+      setIsLoading(true);
+      setMessage("");
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        setMessage("No se pudo validar la sesión.");
+        setIsLoading(false);
+        return;
+      }
+
+      setUserId(user.id);
+
+      const { data, error } = await supabase
+        .from("spaces")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        setMessage(error.message);
+        setIsLoading(false);
+        return;
+      }
+
+      setSpaces(data ?? []);
+      setIsLoading(false);
     }
 
-    setIsLoaded(true);
-  }, []);
+    loadSpaces();
+  }, [supabase]);
 
-  useEffect(() => {
-    if (!isLoaded) return;
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(spaces));
-  }, [spaces, isLoaded]);
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!userId) {
+      setMessage("No hay usuario activo.");
+      return;
+    }
 
     const numericAmount = Number(amount);
 
     if (!name.trim() || !description.trim() || numericAmount < 0) {
+      setMessage("Completa todos los campos correctamente.");
       return;
     }
 
-    const newSpace: Space = {
-      id: Date.now(),
-      name,
-      type,
-      amount: numericAmount,
-      description,
-    };
+    setIsSaving(true);
+    setMessage("");
 
-    setSpaces((current) => [newSpace, ...current]);
+    const { data, error } = await supabase
+      .from("spaces")
+      .insert({
+        name,
+        type,
+        monthly_budget: numericAmount,
+        description,
+        created_by: userId,
+      })
+      .select()
+      .single();
+
+    setIsSaving(false);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setSpaces((current) => [data, ...current]);
 
     setName("");
-    setType("Personal");
+    setType("personal");
     setAmount("");
     setDescription("");
+    setMessage("Mapa financiero creado correctamente.");
   }
 
-  function removeSpace(id: number) {
+  async function removeSpace(id: string) {
+    setMessage("");
+
+    const { error } = await supabase.from("spaces").delete().eq("id", id);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
     setSpaces((current) => current.filter((space) => space.id !== id));
-  }
-
-  function resetDemoData() {
-    setSpaces(initialSpaces);
+    setMessage("Mapa eliminado correctamente.");
   }
 
   return (
@@ -109,17 +150,13 @@ export default function SpacesPage() {
           <div>
             <h2 className="text-2xl font-bold">Crear mapa financiero</h2>
             <p className="mt-2 text-sm text-slate-400">
-              Los mapas quedan guardados en este navegador.
+              Los mapas ahora se guardan en Supabase.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={resetDemoData}
-            className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
-          >
-            Restaurar datos demo
-          </button>
+          <span className="rounded-full bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-300">
+            Base de datos activa
+          </span>
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -138,8 +175,8 @@ export default function SpacesPage() {
               onChange={(event) => setType(event.target.value as SpaceType)}
               className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
             >
-              <option>Personal</option>
-              <option>Compartido</option>
+              <option value="personal">Personal</option>
+              <option value="shared">Compartido</option>
             </select>
           </Field>
 
@@ -164,47 +201,67 @@ export default function SpacesPage() {
           </Field>
         </div>
 
+        {message && (
+          <p className="mt-5 rounded-2xl border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
+            {message}
+          </p>
+        )}
+
         <button
           type="submit"
-          className="mt-6 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
+          disabled={isSaving}
+          className="mt-6 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Guardar mapa
+          {isSaving ? "Guardando..." : "Guardar mapa"}
         </button>
       </form>
 
-      <div className="mt-8 grid gap-4 md:grid-cols-2">
-        {spaces.map((space) => (
-          <article
-            key={space.id}
-            className="rounded-3xl border border-white/10 bg-slate-900 p-6"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold">{space.name}</h2>
-                <span className="mt-3 inline-flex rounded-full bg-emerald-400/10 px-3 py-1 text-sm font-semibold text-emerald-300">
-                  {space.type}
-                </span>
+      {isLoading ? (
+        <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900 p-6">
+          <p className="text-slate-400">Cargando mapas financieros...</p>
+        </section>
+      ) : spaces.length === 0 ? (
+        <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900 p-6">
+          <h2 className="text-2xl font-bold">Aún no tienes mapas</h2>
+          <p className="mt-2 text-sm text-slate-400">
+            Crea tu primer mapa personal o compartido para empezar.
+          </p>
+        </section>
+      ) : (
+        <div className="mt-8 grid gap-4 md:grid-cols-2">
+          {spaces.map((space) => (
+            <article
+              key={space.id}
+              className="rounded-3xl border border-white/10 bg-slate-900 p-6"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold">{space.name}</h2>
+                  <span className="mt-3 inline-flex rounded-full bg-emerald-400/10 px-3 py-1 text-sm font-semibold text-emerald-300">
+                    {getSpaceTypeLabel(space.type)}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => removeSpace(space.id)}
+                  className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                >
+                  Quitar
+                </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => removeSpace(space.id)}
-                className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:bg-white/10 hover:text-white"
-              >
-                Quitar
-              </button>
-            </div>
+              <p className="mt-4 text-3xl font-black">
+                {moneyFormatter.format(space.monthly_budget)}
+              </p>
 
-            <p className="mt-4 text-3xl font-black">
-              {moneyFormatter.format(space.amount)}
-            </p>
-
-            <p className="mt-3 text-sm leading-6 text-slate-400">
-              {space.description}
-            </p>
-          </article>
-        ))}
-      </div>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                {space.description}
+              </p>
+            </article>
+          ))}
+        </div>
+      )}
     </SimplePage>
   );
 }
