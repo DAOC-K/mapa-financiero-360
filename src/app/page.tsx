@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 export default function Home() {
   return (
@@ -13,40 +13,50 @@ export default function Home() {
         </h1>
 
         <p className="mt-6 max-w-2xl text-lg text-slate-300">
-          Una web app para organizar ingresos, gastos, metas y aportes
-          compartidos. Ideal para personas, parejas o grupos que quieren ver con
-          claridad hacia dónde va su dinero.
+          Una web app para organizar ingresos, gastos, metas, aportes
+          compartidos y decisiones financieras mensuales. Diseñada para personas,
+          parejas o grupos que quieren ver con claridad hacia dónde va su dinero.
         </p>
 
         <div className="mt-10 flex flex-col gap-4 sm:flex-row">
           <Link
-            href="/dashboard"
+            href="/register"
             className="rounded-full bg-emerald-400 px-8 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
           >
-            Ver dashboard
+            Crear cuenta gratis
           </Link>
 
           <Link
-            href="/spaces"
+            href="/login"
             className="rounded-full border border-white/20 px-8 py-3 font-semibold text-white transition hover:bg-white/10"
           >
-            Crear mapa financiero
+            Iniciar sesión
           </Link>
         </div>
 
         <div className="mt-16 grid w-full gap-4 md:grid-cols-3">
           <FeatureCard
             title="Mapa personal"
-            description="Organiza tus ingresos, gastos, metas y dinero disponible."
+            description="Organiza tus ingresos, gastos, metas y dinero disponible en un solo lugar."
           />
           <FeatureCard
             title="Mapa compartido"
-            description="Une aportes con otra persona sin perder privacidad financiera."
+            description="Crea espacios financieros para pareja, hogar o grupo, manteniendo claridad sobre aportes y gastos."
           />
           <FeatureCard
             title="Decisión del mes"
-            description="Define qué hacer con el dinero disponible de forma clara."
+            description="Distribuye el dinero disponible entre ahorro, inversión, deudas, metas o dinero libre."
           />
+        </div>
+
+        <div className="mt-10 rounded-3xl border border-emerald-400/20 bg-emerald-400/10 p-6">
+          <p className="text-sm font-semibold text-emerald-300">
+            MVP activo con Supabase
+          </p>
+          <p className="mt-2 text-sm text-slate-300">
+            Login, registro, mapas, movimientos, metas, decisiones y dashboard
+            ya conectados a base de datos.
+          </p>
         </div>
       </section>
     </main>
