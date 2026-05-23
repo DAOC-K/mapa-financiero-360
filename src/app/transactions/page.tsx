@@ -2,61 +2,28 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import SimplePage from "@/components/SimplePage";
+import { createClient } from "@/lib/supabase/client";
 
-type TransactionType = "Ingreso" | "Gasto";
-type FixedType = "Fijo" | "Variable";
-type SpaceType = "Personal" | "Compartido";
+type TransactionType = "income" | "expense";
 
-type Transaction = {
-  id: number;
+type Space = {
+  id: string;
   name: string;
-  type: TransactionType;
-  amount: number;
-  category: string;
-  fixedType: FixedType;
-  space: SpaceType;
 };
 
-const STORAGE_KEY = "mapa-financiero-transactions";
-
-const initialTransactions: Transaction[] = [
-  {
-    id: 1,
-    name: "Salario",
-    type: "Ingreso",
-    amount: 4000000,
-    category: "Trabajo",
-    fixedType: "Fijo",
-    space: "Personal",
-  },
-  {
-    id: 2,
-    name: "Arriendo",
-    type: "Gasto",
-    amount: 1200000,
-    category: "Hogar",
-    fixedType: "Fijo",
-    space: "Compartido",
-  },
-  {
-    id: 3,
-    name: "Mercado",
-    type: "Gasto",
-    amount: 600000,
-    category: "Alimentación",
-    fixedType: "Variable",
-    space: "Compartido",
-  },
-  {
-    id: 4,
-    name: "Inversión mensual",
-    type: "Gasto",
-    amount: 800000,
-    category: "Inversión",
-    fixedType: "Fijo",
-    space: "Personal",
-  },
-];
+type Transaction = {
+  id: string;
+  space_id: string;
+  user_id: string;
+  type: TransactionType;
+  name: string;
+  amount: number;
+  category: string;
+  date: string;
+  is_fixed: boolean;
+  visibility: "private" | "shared";
+  created_at: string;
+};
 
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -64,41 +31,91 @@ const moneyFormatter = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
+function getTypeLabel(type: TransactionType) {
+  return type === "income" ? "Ingreso" : "Gasto";
+}
+
 export default function TransactionsPage() {
-  const [transactions, setTransactions] = useState(initialTransactions);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const supabase = useMemo(() => createClient(), []);
+
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [spaces, setSpaces] = useState<Space[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [name, setName] = useState("");
-  const [type, setType] = useState<TransactionType>("Gasto");
+  const [type, setType] = useState<TransactionType>("expense");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("");
-  const [fixedType, setFixedType] = useState<FixedType>("Variable");
-  const [space, setSpace] = useState<SpaceType>("Personal");
+  const [isFixed, setIsFixed] = useState(false);
+  const [spaceId, setSpaceId] = useState("");
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const storedTransactions = localStorage.getItem(STORAGE_KEY);
+    async function loadData() {
+      setIsLoading(true);
+      setMessage("");
 
-    if (storedTransactions) {
-      setTransactions(JSON.parse(storedTransactions));
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        setMessage("No se pudo validar la sesión.");
+        setIsLoading(false);
+        return;
+      }
+
+      setUserId(user.id);
+
+      const { data: spacesData, error: spacesError } = await supabase
+        .from("spaces")
+        .select("id, name")
+        .order("created_at", { ascending: false });
+
+      if (spacesError) {
+        setMessage(spacesError.message);
+        setIsLoading(false);
+        return;
+      }
+
+      const availableSpaces = spacesData ?? [];
+      setSpaces(availableSpaces);
+
+      if (availableSpaces.length > 0) {
+        setSpaceId(availableSpaces[0].id);
+      }
+
+      const { data: transactionsData, error: transactionsError } =
+        await supabase
+          .from("transactions")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+      if (transactionsError) {
+        setMessage(transactionsError.message);
+        setIsLoading(false);
+        return;
+      }
+
+      setTransactions(transactionsData ?? []);
+      setIsLoading(false);
     }
 
-    setIsLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!isLoaded) return;
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions));
-  }, [transactions, isLoaded]);
+    loadData();
+  }, [supabase]);
 
   const totals = useMemo(() => {
     const income = transactions
-      .filter((item) => item.type === "Ingreso")
-      .reduce((sum, item) => sum + item.amount, 0);
+      .filter((item) => item.type === "income")
+      .reduce((sum, item) => sum + Number(item.amount), 0);
 
     const expenses = transactions
-      .filter((item) => item.type === "Gasto")
-      .reduce((sum, item) => sum + item.amount, 0);
+      .filter((item) => item.type === "expense")
+      .reduce((sum, item) => sum + Number(item.amount), 0);
 
     return {
       income,
@@ -107,41 +124,77 @@ export default function TransactionsPage() {
     };
   }, [transactions]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function getSpaceName(id: string) {
+    return spaces.find((space) => space.id === id)?.name ?? "Sin mapa";
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!userId) {
+      setMessage("No hay usuario activo.");
+      return;
+    }
+
+    if (!spaceId) {
+      setMessage("Primero crea un mapa financiero.");
+      return;
+    }
 
     const numericAmount = Number(amount);
 
     if (!name.trim() || !category.trim() || numericAmount <= 0) {
+      setMessage("Completa todos los campos correctamente.");
       return;
     }
 
-    const newTransaction: Transaction = {
-      id: Date.now(),
-      name,
-      type,
-      amount: numericAmount,
-      category,
-      fixedType,
-      space,
-    };
+    setIsSaving(true);
+    setMessage("");
 
-    setTransactions((current) => [newTransaction, ...current]);
+    const { data, error } = await supabase
+      .from("transactions")
+      .insert({
+        space_id: spaceId,
+        user_id: userId,
+        type,
+        name,
+        amount: numericAmount,
+        category,
+        is_fixed: isFixed,
+        visibility: "shared",
+      })
+      .select()
+      .single();
+
+    setIsSaving(false);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setTransactions((current) => [data, ...current]);
 
     setName("");
+    setType("expense");
     setAmount("");
     setCategory("");
-    setType("Gasto");
-    setFixedType("Variable");
-    setSpace("Personal");
+    setIsFixed(false);
+    setMessage("Movimiento creado correctamente.");
   }
 
-  function removeTransaction(id: number) {
+  async function removeTransaction(id: string) {
+    setMessage("");
+
+    const { error } = await supabase.from("transactions").delete().eq("id", id);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
     setTransactions((current) => current.filter((item) => item.id !== id));
-  }
-
-  function resetDemoData() {
-    setTransactions(initialTransactions);
+    setMessage("Movimiento eliminado correctamente.");
   }
 
   return (
@@ -163,17 +216,13 @@ export default function TransactionsPage() {
           <div>
             <h2 className="text-2xl font-bold">Agregar movimiento</h2>
             <p className="mt-2 text-sm text-slate-400">
-              Ahora los movimientos quedan guardados en este navegador.
+              Los movimientos ahora se guardan en Supabase.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={resetDemoData}
-            className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
-          >
-            Restaurar datos demo
-          </button>
+          <span className="rounded-full bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-300">
+            Base de datos activa
+          </span>
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -212,81 +261,108 @@ export default function TransactionsPage() {
               onChange={(event) => setType(event.target.value as TransactionType)}
               className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
             >
-              <option>Ingreso</option>
-              <option>Gasto</option>
+              <option value="income">Ingreso</option>
+              <option value="expense">Gasto</option>
+            </select>
+          </Field>
+
+          <Field label="Mapa financiero">
+            <select
+              value={spaceId}
+              onChange={(event) => setSpaceId(event.target.value)}
+              className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
+            >
+              {spaces.map((space) => (
+                <option key={space.id} value={space.id}>
+                  {space.name}
+                </option>
+              ))}
             </select>
           </Field>
 
           <Field label="Clasificación">
             <select
-              value={fixedType}
-              onChange={(event) => setFixedType(event.target.value as FixedType)}
+              value={isFixed ? "fixed" : "variable"}
+              onChange={(event) => setIsFixed(event.target.value === "fixed")}
               className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
             >
-              <option>Fijo</option>
-              <option>Variable</option>
-            </select>
-          </Field>
-
-          <Field label="Mapa">
-            <select
-              value={space}
-              onChange={(event) => setSpace(event.target.value as SpaceType)}
-              className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
-            >
-              <option>Personal</option>
-              <option>Compartido</option>
+              <option value="fixed">Fijo</option>
+              <option value="variable">Variable</option>
             </select>
           </Field>
         </div>
 
+        {message && (
+          <p className="mt-5 rounded-2xl border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
+            {message}
+          </p>
+        )}
+
         <button
           type="submit"
-          className="mt-6 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
+          disabled={isSaving || spaces.length === 0}
+          className="mt-6 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Guardar movimiento
+          {isSaving ? "Guardando..." : "Guardar movimiento"}
         </button>
       </form>
 
-      <div className="mt-8 overflow-hidden rounded-3xl border border-white/10">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-900 text-slate-400">
-            <tr>
-              <th className="p-4">Nombre</th>
-              <th className="p-4">Tipo</th>
-              <th className="p-4">Categoría</th>
-              <th className="p-4">Clasificación</th>
-              <th className="p-4">Mapa</th>
-              <th className="p-4 text-right">Monto</th>
-              <th className="p-4 text-right">Acción</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {transactions.map((item) => (
-              <tr key={item.id} className="border-t border-white/10">
-                <td className="p-4 font-semibold">{item.name}</td>
-                <td className="p-4 text-slate-300">{item.type}</td>
-                <td className="p-4 text-slate-300">{item.category}</td>
-                <td className="p-4 text-slate-300">{item.fixedType}</td>
-                <td className="p-4 text-slate-300">{item.space}</td>
-                <td className="p-4 text-right font-bold">
-                  {moneyFormatter.format(item.amount)}
-                </td>
-                <td className="p-4 text-right">
-                  <button
-                    type="button"
-                    onClick={() => removeTransaction(item.id)}
-                    className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:bg-white/10 hover:text-white"
-                  >
-                    Quitar
-                  </button>
-                </td>
+      {isLoading ? (
+        <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900 p-6">
+          <p className="text-slate-400">Cargando movimientos...</p>
+        </section>
+      ) : transactions.length === 0 ? (
+        <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900 p-6">
+          <h2 className="text-2xl font-bold">Aún no tienes movimientos</h2>
+          <p className="mt-2 text-sm text-slate-400">
+            Registra tu primer ingreso o gasto para empezar a construir el mapa.
+          </p>
+        </section>
+      ) : (
+        <div className="mt-8 overflow-hidden rounded-3xl border border-white/10">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-900 text-slate-400">
+              <tr>
+                <th className="p-4">Nombre</th>
+                <th className="p-4">Tipo</th>
+                <th className="p-4">Categoría</th>
+                <th className="p-4">Clasificación</th>
+                <th className="p-4">Mapa</th>
+                <th className="p-4 text-right">Monto</th>
+                <th className="p-4 text-right">Acción</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+
+            <tbody>
+              {transactions.map((item) => (
+                <tr key={item.id} className="border-t border-white/10">
+                  <td className="p-4 font-semibold">{item.name}</td>
+                  <td className="p-4 text-slate-300">{getTypeLabel(item.type)}</td>
+                  <td className="p-4 text-slate-300">{item.category}</td>
+                  <td className="p-4 text-slate-300">
+                    {item.is_fixed ? "Fijo" : "Variable"}
+                  </td>
+                  <td className="p-4 text-slate-300">
+                    {getSpaceName(item.space_id)}
+                  </td>
+                  <td className="p-4 text-right font-bold">
+                    {moneyFormatter.format(Number(item.amount))}
+                  </td>
+                  <td className="p-4 text-right">
+                    <button
+                      type="button"
+                      onClick={() => removeTransaction(item.id)}
+                      className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                    >
+                      Quitar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </SimplePage>
   );
 }
