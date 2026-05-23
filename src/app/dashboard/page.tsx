@@ -288,7 +288,7 @@ export default function DashboardPage() {
                 Presupuesto compartido
               </h2>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-3">
+              <div className="mt-6 grid gap-4 md:grid-cols-1 2xl:grid-cols-3">
                 <div className="rounded-2xl bg-slate-950 p-5">
                   <p className="text-sm text-slate-400">Mapas creados</p>
                   <p className="mt-2 text-2xl font-bold">
