@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import SimplePage from "@/components/SimplePage";
 import { createClient } from "@/lib/supabase/client";
@@ -422,6 +423,7 @@ export default function SpacesPage() {
               key={space.id}
               className="rounded-3xl border border-white/10 bg-slate-900 p-6"
             >
+
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-bold">{space.name}</h2>
@@ -430,16 +432,27 @@ export default function SpacesPage() {
                   </span>
                 </div>
 
-                {space.created_by === userId && (
-                  <button
-                    type="button"
-                    onClick={() => removeSpace(space.id)}
-                    className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/spaces/${space.id}`}
+                    className="rounded-full bg-emerald-400 px-3 py-1 text-xs font-semibold text-slate-950 transition hover:bg-emerald-300"
                   >
-                    Quitar
-                  </button>
-                )}
+                    Entrar
+                  </Link>
+
+                  {space.created_by === userId && (
+                    <button
+                      type="button"
+                      onClick={() => removeSpace(space.id)}
+                      className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 transition hover:bg-white/10 hover:text-white"
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </div>
               </div>
+
+
 
               <p className="mt-4 text-3xl font-black">
                 {moneyFormatter.format(Number(space.monthly_budget))}
