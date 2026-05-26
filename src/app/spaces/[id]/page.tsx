@@ -1,10 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import SimplePage from "@/components/SimplePage";
 import { createClient } from "@/lib/supabase/client";
+
+type Tab = "summary" | "quick" | "movements" | "goals" | "members";
 
 type Space = {
   id: string;
@@ -41,31 +43,148 @@ type Goal = {
   created_at: string;
 };
 
+type SpaceMember = {
+  space_id: string;
+  user_id: string;
+  role: "owner" | "member";
+  created_at: string;
+};
+
+type SpaceInvitation = {
+  id: string;
+  space_id: string;
+  space_name: string;
+  invited_email: string;
+  invited_by: string;
+  status: "pending" | "accepted" | "declined";
+  created_at: string;
+  accepted_at: string | null;
+};
+
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
   currency: "COP",
   maximumFractionDigits: 0,
 });
 
+const tabs: { id: Tab; label: string }[] = [
+  { id: "summary", label: "Resumen" },
+  { id: "quick", label: "Registro rápido" },
+  { id: "movements", label: "Movimientos" },
+  { id: "goals", label: "Metas" },
+  { id: "members", label: "Miembros" },
+];
+
+function detectTransactionType(text: string): "income" | "expense" {
+  const lower = text.toLowerCase();
+
+  const incomeWords = [
+    "sueldo",
+    "salario",
+    "ingreso",
+    "pago",
+    "freelance",
+    "venta",
+    "comision",
+    "comisión",
+    "bono",
+  ];
+
+  return incomeWords.some((word) => lower.includes(word))
+    ? "income"
+    : "expense";
+}
+
+function detectCategory(text: string) {
+  const lower = text.toLowerCase();
+
+  if (lower.includes("uber") || lower.includes("taxi") || lower.includes("bus")) {
+    return "Transporte";
+  }
+
+  if (
+    lower.includes("mercado") ||
+    lower.includes("comida") ||
+    lower.includes("restaurante") ||
+    lower.includes("almuerzo") ||
+    lower.includes("cena")
+  ) {
+    return "Alimentación";
+  }
+
+  if (
+    lower.includes("arriendo") ||
+    lower.includes("renta") ||
+    lower.includes("servicio") ||
+    lower.includes("luz") ||
+    lower.includes("agua") ||
+    lower.includes("internet")
+  ) {
+    return "Hogar";
+  }
+
+  if (
+    lower.includes("sueldo") ||
+    lower.includes("salario") ||
+    lower.includes("freelance") ||
+    lower.includes("pago")
+  ) {
+    return "Trabajo";
+  }
+
+  if (
+    lower.includes("inversion") ||
+    lower.includes("inversión") ||
+    lower.includes("accion") ||
+    lower.includes("acción") ||
+    lower.includes("etf")
+  ) {
+    return "Inversión";
+  }
+
+  return "General";
+}
+
+function parseQuickMovement(text: string) {
+  const amountMatch = text.match(/(\d[\d.,]*)/);
+  const amountText = amountMatch?.[1] ?? "";
+  const amount = Number(amountText.replace(/[.,]/g, ""));
+
+  const cleanName = text
+    .replace(amountText, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    name: cleanName || "Movimiento rápido",
+    amount,
+    type: detectTransactionType(text),
+    category: detectCategory(text),
+  };
+}
+
 export default function SpaceDetailPage() {
   const params = useParams<{ id: string }>();
   const spaceId = params.id;
   const supabase = useMemo(() => createClient(), []);
 
+  const [activeTab, setActiveTab] = useState<Tab>("summary");
+
   const [space, setSpace] = useState<Space | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [members, setMembers] = useState<SpaceMember[]>([]);
+  const [invitations, setInvitations] = useState<SpaceInvitation[]>([]);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState("");
 
-  const [transactionName, setTransactionName] = useState("");
-  const [transactionType, setTransactionType] = useState<"income" | "expense">(
-    "expense",
-  );
-  const [transactionAmount, setTransactionAmount] = useState("");
-  const [transactionCategory, setTransactionCategory] = useState("");
-  const [isFixed, setIsFixed] = useState(false);
+  const [quickText, setQuickText] = useState("");
+
+  const [manualName, setManualName] = useState("");
+  const [manualType, setManualType] = useState<"income" | "expense">("expense");
+  const [manualAmount, setManualAmount] = useState("");
+  const [manualCategory, setManualCategory] = useState("");
 
   const [goalName, setGoalName] = useState("");
   const [goalCurrentAmount, setGoalCurrentAmount] = useState("");
@@ -75,12 +194,15 @@ export default function SpaceDetailPage() {
   const [inviteEmail, setInviteEmail] = useState("");
 
   const [isLoading, setIsLoading] = useState(true);
-  const [isSavingTransaction, setIsSavingTransaction] = useState(false);
+  const [isSavingQuick, setIsSavingQuick] = useState(false);
+  const [isSavingManual, setIsSavingManual] = useState(false);
   const [isSavingGoal, setIsSavingGoal] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function loadSpace() {
+  const isOwner = space?.created_by === userId;
+
+  const loadData = useCallback(async () => {
     setIsLoading(true);
     setMessage("");
 
@@ -134,15 +256,34 @@ export default function SpaceDetailPage() {
       return;
     }
 
+    const { data: membersData } = await supabase
+      .from("space_members")
+      .select("*")
+      .eq("space_id", spaceId);
+
+    let invitationsData: SpaceInvitation[] = [];
+
+    if (spaceData.created_by === user.id) {
+      const { data } = await supabase
+        .from("space_invitations")
+        .select("*")
+        .eq("space_id", spaceId)
+        .order("created_at", { ascending: false });
+
+      invitationsData = data ?? [];
+    }
+
     setSpace(spaceData);
     setTransactions(transactionsData ?? []);
     setGoals(goalsData ?? []);
+    setMembers(membersData ?? []);
+    setInvitations(invitationsData);
     setIsLoading(false);
-  }
+  }, [spaceId, supabase]);
 
   useEffect(() => {
-    loadSpace();
-  }, [spaceId]);
+    loadData();
+  }, [loadData]);
 
   const summary = useMemo(() => {
     const income = transactions
@@ -157,60 +298,108 @@ export default function SpaceDetailPage() {
       income,
       expenses,
       available: income - expenses,
+      goalsCount: goals.length,
+      membersCount: Math.max(members.length, 1),
+      pendingInvitations: invitations.filter((item) => item.status === "pending")
+        .length,
     };
-  }, [transactions]);
+  }, [transactions, goals, members, invitations]);
 
-  async function handleCreateTransaction(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function createTransaction(input: {
+    name: string;
+    type: "income" | "expense";
+    amount: number;
+    category: string;
+  }) {
     if (!userId) {
       setMessage("No hay usuario activo.");
-      return;
+      return null;
     }
-
-    const amount = Number(transactionAmount);
-
-    if (!transactionName.trim() || !transactionCategory.trim() || amount <= 0) {
-      setMessage("Completa correctamente el movimiento.");
-      return;
-    }
-
-    setIsSavingTransaction(true);
-    setMessage("");
 
     const { data, error } = await supabase
       .from("transactions")
       .insert({
         space_id: spaceId,
         user_id: userId,
-        type: transactionType,
-        name: transactionName,
-        amount,
-        category: transactionCategory,
+        type: input.type,
+        name: input.name,
+        amount: input.amount,
+        category: input.category,
         date: new Date().toISOString().slice(0, 10),
-        is_fixed: isFixed,
+        is_fixed: false,
         visibility: "shared",
       })
       .select()
       .single();
 
-    setIsSavingTransaction(false);
-
     if (error) {
       setMessage(error.message);
-      return;
+      return null;
     }
 
     setTransactions((current) => [data, ...current]);
-    setTransactionName("");
-    setTransactionType("expense");
-    setTransactionAmount("");
-    setTransactionCategory("");
-    setIsFixed(false);
+    return data;
+  }
+
+  async function handleQuickSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const parsed = parseQuickMovement(quickText);
+
+    if (!quickText.trim() || parsed.amount <= 0) {
+      setMessage("Escribe un movimiento con monto. Ej: mercado 320000 alimentación");
+      return;
+    }
+
+    setIsSavingQuick(true);
+    setMessage("");
+
+    const result = await createTransaction(parsed);
+
+    setIsSavingQuick(false);
+
+    if (!result) {
+      return;
+    }
+
+    setQuickText("");
+    setMessage("Movimiento rápido agregado al mapa.");
+  }
+
+  async function handleManualSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const amount = Number(manualAmount);
+
+    if (!manualName.trim() || !manualCategory.trim() || amount <= 0) {
+      setMessage("Completa correctamente el movimiento.");
+      return;
+    }
+
+    setIsSavingManual(true);
+    setMessage("");
+
+    const result = await createTransaction({
+      name: manualName,
+      type: manualType,
+      amount,
+      category: manualCategory,
+    });
+
+    setIsSavingManual(false);
+
+    if (!result) {
+      return;
+    }
+
+    setManualName("");
+    setManualType("expense");
+    setManualAmount("");
+    setManualCategory("");
     setMessage("Movimiento agregado al mapa.");
   }
 
-  async function handleCreateGoal(event: FormEvent<HTMLFormElement>) {
+  async function handleGoalSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!userId) {
@@ -221,7 +410,7 @@ export default function SpaceDetailPage() {
     const currentAmount = Number(goalCurrentAmount);
     const targetAmount = Number(goalTargetAmount);
 
-    if (!goalName.trim() || targetAmount <= 0 || currentAmount < 0) {
+    if (!goalName.trim() || currentAmount < 0 || targetAmount <= 0) {
       setMessage("Completa correctamente la meta.");
       return;
     }
@@ -300,14 +489,13 @@ export default function SpaceDetailPage() {
 
     setInviteEmail("");
     setMessage(`Invitación enviada a ${email}.`);
+    await loadData();
   }
-
-  const isOwner = space?.created_by === userId;
 
   return (
     <SimplePage
       title={space?.name ?? "Mapa financiero"}
-      description={space?.description ?? "Detalle del mapa financiero."}
+      description={space?.description ?? "Centro de control financiero del mapa."}
     >
       <div className="mb-6 flex flex-wrap gap-3">
         <Link
@@ -317,28 +505,20 @@ export default function SpaceDetailPage() {
           ← Volver a mapas
         </Link>
 
-        <a
-          href="#movimiento"
-          className="inline-flex rounded-full bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
-        >
-          Agregar movimiento
-        </a>
-
-        <a
-          href="#meta"
-          className="inline-flex rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
-        >
-          Agregar meta
-        </a>
-
-        {space?.type === "shared" && isOwner && (
-          <a
-            href="#invitar"
-            className="inline-flex rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+              activeTab === tab.id
+                ? "bg-emerald-400 text-slate-950"
+                : "border border-white/10 text-slate-300 hover:bg-white/10 hover:text-white"
+            }`}
           >
-            Invitar miembro
-          </a>
-        )}
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {message && (
@@ -353,191 +533,158 @@ export default function SpaceDetailPage() {
         </section>
       ) : (
         <div className="grid gap-6">
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard
-              title="Presupuesto"
-              value={moneyFormatter.format(Number(space?.monthly_budget ?? 0))}
-              detail="Monto base del mapa"
-            />
-            <SummaryCard
-              title="Ingresos"
-              value={moneyFormatter.format(summary.income)}
-              detail="Ingresos de este mapa"
-            />
-            <SummaryCard
-              title="Gastos"
-              value={moneyFormatter.format(summary.expenses)}
-              detail="Gastos de este mapa"
-            />
-            <SummaryCard
-              title="Disponible"
-              value={moneyFormatter.format(summary.available)}
-              detail="Ingresos menos gastos"
-              warning={summary.available < 0}
-            />
-          </section>
-
-          <section className="grid gap-6 xl:grid-cols-2">
-            <form
-              id="movimiento"
-              onSubmit={handleCreateTransaction}
-              className="rounded-3xl border border-white/10 bg-slate-900 p-6"
-            >
-              <h2 className="text-2xl font-bold">Agregar movimiento</h2>
-              <p className="mt-2 text-sm text-slate-400">
-                Registra ingresos o gastos directamente en este mapa.
-              </p>
-
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <input
-                  value={transactionName}
-                  onChange={(event) => setTransactionName(event.target.value)}
-                  placeholder="Nombre"
-                  className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+          {activeTab === "summary" && (
+            <>
+              <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <SummaryCard
+                  title="Presupuesto"
+                  value={moneyFormatter.format(Number(space?.monthly_budget ?? 0))}
+                  detail="Monto base del mapa"
                 />
-
-                <select
-                  value={transactionType}
-                  onChange={(event) =>
-                    setTransactionType(event.target.value as "income" | "expense")
-                  }
-                  className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
-                >
-                  <option value="income">Ingreso</option>
-                  <option value="expense">Gasto</option>
-                </select>
-
-                <input
-                  value={transactionAmount}
-                  onChange={(event) => setTransactionAmount(event.target.value)}
-                  type="number"
-                  min="0"
-                  placeholder="Monto"
-                  className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                <SummaryCard
+                  title="Ingresos"
+                  value={moneyFormatter.format(summary.income)}
+                  detail="Ingresos del mapa"
                 />
-
-                <input
-                  value={transactionCategory}
-                  onChange={(event) =>
-                    setTransactionCategory(event.target.value)
-                  }
-                  placeholder="Categoría"
-                  className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                <SummaryCard
+                  title="Gastos"
+                  value={moneyFormatter.format(summary.expenses)}
+                  detail="Gastos del mapa"
                 />
-              </div>
-
-              <label className="mt-4 flex items-center gap-3 text-sm text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={isFixed}
-                  onChange={(event) => setIsFixed(event.target.checked)}
+                <SummaryCard
+                  title="Disponible"
+                  value={moneyFormatter.format(summary.available)}
+                  detail="Ingresos menos gastos"
+                  warning={summary.available < 0}
                 />
-                Es gasto fijo
-              </label>
+              </section>
 
-              <button
-                disabled={isSavingTransaction}
-                className="mt-6 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
+              <section className="grid gap-4 md:grid-cols-3">
+                <SummaryCard
+                  title="Metas"
+                  value={String(summary.goalsCount)}
+                  detail="Metas activas en este mapa"
+                />
+                <SummaryCard
+                  title="Miembros"
+                  value={String(summary.membersCount)}
+                  detail="Personas dentro del mapa"
+                />
+                <SummaryCard
+                  title="Invitaciones"
+                  value={String(summary.pendingInvitations)}
+                  detail="Pendientes por aceptar"
+                />
+              </section>
+            </>
+          )}
+
+          {activeTab === "quick" && (
+            <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+              <form
+                onSubmit={handleQuickSubmit}
+                className="rounded-3xl border border-white/10 bg-slate-900 p-6"
               >
-                {isSavingTransaction ? "Guardando..." : "Guardar movimiento"}
-              </button>
-            </form>
+                <h2 className="text-2xl font-bold">Registro rápido</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  Escribe un movimiento como lo dirías normalmente. La app intenta
+                  detectar monto, tipo y categoría.
+                </p>
 
-            <form
-              id="meta"
-              onSubmit={handleCreateGoal}
-              className="rounded-3xl border border-white/10 bg-slate-900 p-6"
-            >
-              <h2 className="text-2xl font-bold">Agregar meta</h2>
-              <p className="mt-2 text-sm text-slate-400">
-                Crea una meta asociada directamente a este mapa.
-              </p>
-
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <input
-                  value={goalName}
-                  onChange={(event) => setGoalName(event.target.value)}
-                  placeholder="Nombre de la meta"
-                  className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
-                />
-
-                <input
-                  value={goalCurrentAmount}
-                  onChange={(event) => setGoalCurrentAmount(event.target.value)}
-                  type="number"
-                  min="0"
-                  placeholder="Monto actual"
-                  className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
-                />
-
-                <input
-                  value={goalTargetAmount}
-                  onChange={(event) => setGoalTargetAmount(event.target.value)}
-                  type="number"
-                  min="0"
-                  placeholder="Meta total"
-                  className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
-                />
-
-                <input
-                  value={goalTargetDate}
-                  onChange={(event) => setGoalTargetDate(event.target.value)}
-                  type="date"
-                  className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
-                />
-              </div>
-
-              <button
-                disabled={isSavingGoal}
-                className="mt-6 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
-              >
-                {isSavingGoal ? "Guardando..." : "Guardar meta"}
-              </button>
-            </form>
-          </section>
-
-          {space?.type === "shared" && isOwner && (
-            <section
-              id="invitar"
-              className="rounded-3xl border border-white/10 bg-slate-900 p-6"
-            >
-              <h2 className="text-2xl font-bold">Invitar miembro</h2>
-              <p className="mt-2 text-sm text-slate-400">
-                Invita a otra persona para que trabaje contigo en este mapa.
-              </p>
-
-              <div className="mt-6 flex flex-col gap-3 md:flex-row">
-                <input
-                  value={inviteEmail}
-                  onChange={(event) => setInviteEmail(event.target.value)}
-                  type="email"
-                  placeholder="correo@ejemplo.com"
-                  className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                <textarea
+                  value={quickText}
+                  onChange={(event) => setQuickText(event.target.value)}
+                  placeholder="Ej: mercado 320000 alimentación&#10;Ej: sueldo 4000000 ingreso&#10;Ej: uber 25000 transporte"
+                  rows={6}
+                  className="mt-6 w-full rounded-3xl border border-white/10 bg-slate-950 px-4 py-4 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
                 />
 
                 <button
-                  type="button"
-                  onClick={sendInvitation}
-                  disabled={isInviting}
-                  className="rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
+                  disabled={isSavingQuick}
+                  className="mt-5 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
                 >
-                  {isInviting ? "Enviando..." : "Invitar"}
+                  {isSavingQuick ? "Guardando..." : "Agregar al mapa"}
                 </button>
-              </div>
+              </form>
+
+              <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
+                <h2 className="text-2xl font-bold">Ejemplos</h2>
+
+                <div className="mt-6 space-y-3 text-sm text-slate-300">
+                  <p className="rounded-2xl bg-slate-950 p-4">
+                    mercado 320000 alimentación
+                  </p>
+                  <p className="rounded-2xl bg-slate-950 p-4">
+                    sueldo 4000000 ingreso
+                  </p>
+                  <p className="rounded-2xl bg-slate-950 p-4">
+                    uber 25000 transporte
+                  </p>
+                  <p className="rounded-2xl bg-slate-950 p-4">
+                    arriendo 1200000 hogar
+                  </p>
+                </div>
+              </article>
             </section>
           )}
 
-          <section className="grid gap-6 xl:grid-cols-2">
-            <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-              <h2 className="text-2xl font-bold">Movimientos recientes</h2>
+          {activeTab === "movements" && (
+            <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+              <form
+                onSubmit={handleManualSubmit}
+                className="rounded-3xl border border-white/10 bg-slate-900 p-6"
+              >
+                <h2 className="text-2xl font-bold">Nuevo movimiento</h2>
 
-              <div className="mt-6 space-y-3">
+                <div className="mt-6 grid gap-4">
+                  <input
+                    value={manualName}
+                    onChange={(event) => setManualName(event.target.value)}
+                    placeholder="Nombre"
+                    className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                  />
+
+                  <select
+                    value={manualType}
+                    onChange={(event) =>
+                      setManualType(event.target.value as "income" | "expense")
+                    }
+                    className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                  >
+                    <option value="income">Ingreso</option>
+                    <option value="expense">Gasto</option>
+                  </select>
+
+                  <input
+                    value={manualAmount}
+                    onChange={(event) => setManualAmount(event.target.value)}
+                    type="number"
+                    min="0"
+                    placeholder="Monto"
+                    className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                  />
+
+                  <input
+                    value={manualCategory}
+                    onChange={(event) => setManualCategory(event.target.value)}
+                    placeholder="Categoría"
+                    className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <button
+                  disabled={isSavingManual}
+                  className="mt-5 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
+                >
+                  {isSavingManual ? "Guardando..." : "Guardar movimiento"}
+                </button>
+              </form>
+
+              <ListCard title="Movimientos recientes">
                 {transactions.length === 0 ? (
-                  <p className="rounded-2xl bg-slate-950 p-4 text-sm text-slate-400">
-                    Este mapa todavía no tiene movimientos.
-                  </p>
+                  <EmptyText text="Este mapa todavía no tiene movimientos." />
                 ) : (
-                  transactions.slice(0, 6).map((transaction) => (
+                  transactions.map((transaction) => (
                     <div
                       key={transaction.id}
                       className="flex items-center justify-between gap-4 rounded-2xl bg-slate-950 p-4"
@@ -556,19 +703,65 @@ export default function SpaceDetailPage() {
                     </div>
                   ))
                 )}
-              </div>
-            </article>
+              </ListCard>
+            </section>
+          )}
 
-            <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-              <h2 className="text-2xl font-bold">Metas del mapa</h2>
+          {activeTab === "goals" && (
+            <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+              <form
+                onSubmit={handleGoalSubmit}
+                className="rounded-3xl border border-white/10 bg-slate-900 p-6"
+              >
+                <h2 className="text-2xl font-bold">Nueva meta</h2>
 
-              <div className="mt-6 space-y-3">
+                <div className="mt-6 grid gap-4">
+                  <input
+                    value={goalName}
+                    onChange={(event) => setGoalName(event.target.value)}
+                    placeholder="Nombre de la meta"
+                    className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                  />
+
+                  <input
+                    value={goalCurrentAmount}
+                    onChange={(event) => setGoalCurrentAmount(event.target.value)}
+                    type="number"
+                    min="0"
+                    placeholder="Monto actual"
+                    className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                  />
+
+                  <input
+                    value={goalTargetAmount}
+                    onChange={(event) => setGoalTargetAmount(event.target.value)}
+                    type="number"
+                    min="0"
+                    placeholder="Meta total"
+                    className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                  />
+
+                  <input
+                    value={goalTargetDate}
+                    onChange={(event) => setGoalTargetDate(event.target.value)}
+                    type="date"
+                    className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <button
+                  disabled={isSavingGoal}
+                  className="mt-5 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
+                >
+                  {isSavingGoal ? "Guardando..." : "Guardar meta"}
+                </button>
+              </form>
+
+              <ListCard title="Metas del mapa">
                 {goals.length === 0 ? (
-                  <p className="rounded-2xl bg-slate-950 p-4 text-sm text-slate-400">
-                    Este mapa todavía no tiene metas.
-                  </p>
+                  <EmptyText text="Este mapa todavía no tiene metas." />
                 ) : (
-                  goals.slice(0, 6).map((goal) => {
+                  goals.map((goal) => {
                     const progress =
                       Number(goal.target_amount) > 0
                         ? Math.min(
@@ -607,9 +800,88 @@ export default function SpaceDetailPage() {
                     );
                   })
                 )}
-              </div>
-            </article>
-          </section>
+              </ListCard>
+            </section>
+          )}
+
+          {activeTab === "members" && (
+            <section className="grid gap-6 xl:grid-cols-2">
+              <ListCard title="Miembros">
+                {members.length === 0 ? (
+                  <EmptyText text="No se encontraron miembros adicionales." />
+                ) : (
+                  members.map((member) => (
+                    <div
+                      key={`${member.space_id}-${member.user_id}`}
+                      className="rounded-2xl bg-slate-950 p-4"
+                    >
+                      <p className="font-semibold">
+                        {member.role === "owner" ? "Dueño" : "Miembro"}
+                      </p>
+                      <p className="mt-1 break-all text-xs text-slate-500">
+                        {member.user_id}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </ListCard>
+
+              {space?.type === "shared" && isOwner ? (
+                <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
+                  <h2 className="text-2xl font-bold">Invitar miembro</h2>
+                  <p className="mt-2 text-sm text-slate-400">
+                    Invita a otra persona para trabajar contigo en este mapa.
+                  </p>
+
+                  <div className="mt-6 flex flex-col gap-3">
+                    <input
+                      value={inviteEmail}
+                      onChange={(event) => setInviteEmail(event.target.value)}
+                      type="email"
+                      placeholder="correo@ejemplo.com"
+                      className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-400"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={sendInvitation}
+                      disabled={isInviting}
+                      className="rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
+                    >
+                      {isInviting ? "Enviando..." : "Invitar"}
+                    </button>
+                  </div>
+
+                  <div className="mt-6 space-y-3">
+                    {invitations.length === 0 ? (
+                      <EmptyText text="Aún no hay invitaciones para este mapa." />
+                    ) : (
+                      invitations.map((invitation) => (
+                        <div
+                          key={invitation.id}
+                          className="rounded-2xl bg-slate-950 p-4"
+                        >
+                          <p className="font-semibold">
+                            {invitation.invited_email}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Estado: {invitation.status}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </article>
+              ) : (
+                <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
+                  <h2 className="text-2xl font-bold">Invitaciones</h2>
+                  <p className="mt-2 text-sm text-slate-400">
+                    Solo el dueño del mapa puede invitar nuevos miembros.
+                  </p>
+                </article>
+              )}
+            </section>
+          )}
         </div>
       )}
     </SimplePage>
@@ -639,5 +911,28 @@ function SummaryCard({
       </p>
       <p className="mt-3 text-sm leading-6 text-slate-500">{detail}</p>
     </article>
+  );
+}
+
+function ListCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
+      <h2 className="text-2xl font-bold">{title}</h2>
+      <div className="mt-6 space-y-3">{children}</div>
+    </article>
+  );
+}
+
+function EmptyText({ text }: { text: string }) {
+  return (
+    <p className="rounded-2xl bg-slate-950 p-4 text-sm text-slate-400">
+      {text}
+    </p>
   );
 }
