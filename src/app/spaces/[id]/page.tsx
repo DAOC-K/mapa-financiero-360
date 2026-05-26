@@ -1,10 +1,10 @@
 "use client";
 
-import BillsPanel from "@/components/BillsPanel";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import SimplePage from "@/components/SimplePage";
+import BillsPanel from "@/components/BillsPanel";
 import { createClient } from "@/lib/supabase/client";
 
 type Tab = "summary" | "quick" | "movements" | "bills" | "goals" | "members";
@@ -77,6 +77,22 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "members", label: "Miembros" },
 ];
 
+const spanishMonths: Record<string, number> = {
+  enero: 0,
+  febrero: 1,
+  marzo: 2,
+  abril: 3,
+  mayo: 4,
+  junio: 5,
+  julio: 6,
+  agosto: 7,
+  septiembre: 8,
+  setiembre: 8,
+  octubre: 9,
+  noviembre: 10,
+  diciembre: 11,
+};
+
 function detectTransactionType(text: string): "income" | "expense" {
   const lower = text.toLowerCase();
 
@@ -144,6 +160,16 @@ function detectCategory(text: string) {
     return "Inversión";
   }
 
+  if (
+    lower.includes("tarjeta") ||
+    lower.includes("credito") ||
+    lower.includes("crédito") ||
+    lower.includes("prestamo") ||
+    lower.includes("préstamo")
+  ) {
+    return "Deudas";
+  }
+
   return "General";
 }
 
@@ -162,6 +188,118 @@ function parseQuickMovement(text: string) {
     amount,
     type: detectTransactionType(text),
     category: detectCategory(text),
+  };
+}
+
+function toDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function isBillQuickText(text: string) {
+  const lower = text.toLowerCase();
+
+  return (
+    lower.includes("vence") ||
+    lower.includes("vencimiento") ||
+    lower.includes("fecha limite") ||
+    lower.includes("fecha límite")
+  );
+}
+
+function parseDueDate(text: string) {
+  const lower = text.toLowerCase();
+  const today = new Date();
+
+  if (lower.includes("hoy")) {
+    return toDateInputValue(today);
+  }
+
+  if (lower.includes("mañana") || lower.includes("manana")) {
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return toDateInputValue(tomorrow);
+  }
+
+  const isoMatch = lower.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  const slashMatch = lower.match(/(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?/);
+
+  if (slashMatch) {
+    const [, day, month, yearText] = slashMatch;
+    let year = today.getFullYear();
+
+    if (yearText) {
+      year = Number(yearText.length === 2 ? `20${yearText}` : yearText);
+    }
+
+    const parsedDate = new Date(year, Number(month) - 1, Number(day));
+
+    if (!yearText && parsedDate < today) {
+      parsedDate.setFullYear(parsedDate.getFullYear() + 1);
+    }
+
+    return toDateInputValue(parsedDate);
+  }
+
+  const monthMatch = lower.match(
+    /(?:vence|vencimiento|para|el)\s+(?:el\s+)?(\d{1,2})(?:\s+de)?\s+([a-záéíóúñ]+)/,
+  );
+
+  if (monthMatch) {
+    const [, dayText, monthText] = monthMatch;
+    const month = spanishMonths[monthText];
+
+    if (month === undefined) {
+      return "";
+    }
+
+    const parsedDate = new Date(today.getFullYear(), month, Number(dayText));
+
+    if (parsedDate < today) {
+      parsedDate.setFullYear(parsedDate.getFullYear() + 1);
+    }
+
+    return toDateInputValue(parsedDate);
+  }
+
+  return "";
+}
+
+function parseQuickBill(text: string) {
+  const amountMatch = text.match(/(\d[\d.,]*)/);
+  const amountText = amountMatch?.[1] ?? "";
+  const amount = Number(amountText.replace(/[.,]/g, ""));
+  const dueDate = parseDueDate(text);
+
+  const cleanName = text
+    .replace(amountText, "")
+    .replace(/vence.+$/i, "")
+    .replace(/vencimiento.+$/i, "")
+    .replace(/fecha limite.+$/i, "")
+    .replace(/fecha límite.+$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const lower = text.toLowerCase();
+
+  return {
+    name: cleanName || "Vencimiento rápido",
+    amount,
+    category: detectCategory(text),
+    dueDate,
+    isRecurring:
+      lower.includes("mensual") ||
+      lower.includes("recurrente") ||
+      lower.includes("cada mes"),
   };
 }
 
@@ -343,29 +481,122 @@ export default function SpaceDetailPage() {
     return data;
   }
 
+  async function createBill(input: {
+    name: string;
+    amount: number;
+    category: string;
+    dueDate: string;
+    isRecurring: boolean;
+  }) {
+    if (!userId) {
+      setMessage("No hay usuario activo.");
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from("bills")
+      .insert({
+        space_id: spaceId,
+        user_id: userId,
+        name: input.name,
+        amount: input.amount,
+        category: input.category,
+        due_date: input.dueDate,
+        status: "pending",
+        is_recurring: input.isRecurring,
+        notes: null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      setMessage(error.message);
+      return null;
+    }
+
+    return data;
+  }
+
   async function handleQuickSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const parsed = parseQuickMovement(quickText);
+    const entries = quickText
+      .split(/\n|;/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
 
-    if (!quickText.trim() || parsed.amount <= 0) {
-      setMessage("Escribe un movimiento con monto. Ej: mercado 320000 alimentación");
+    if (entries.length === 0) {
+      setMessage("Escribe al menos un movimiento o vencimiento.");
       return;
     }
 
     setIsSavingQuick(true);
     setMessage("");
 
-    const result = await createTransaction(parsed);
+    let movementCount = 0;
+    let billCount = 0;
+    const errors: string[] = [];
+
+    for (const entry of entries) {
+      if (isBillQuickText(entry)) {
+        const parsedBill = parseQuickBill(entry);
+
+        if (parsedBill.amount <= 0 || !parsedBill.dueDate) {
+          errors.push(`No pude leer el vencimiento: "${entry}"`);
+          continue;
+        }
+
+        const result = await createBill(parsedBill);
+
+        if (result) {
+          billCount += 1;
+        } else {
+          errors.push(`No se pudo guardar el vencimiento: "${entry}"`);
+        }
+
+        continue;
+      }
+
+      const parsedMovement = parseQuickMovement(entry);
+
+      if (parsedMovement.amount <= 0) {
+        errors.push(`No pude leer el movimiento: "${entry}"`);
+        continue;
+      }
+
+      const result = await createTransaction(parsedMovement);
+
+      if (result) {
+        movementCount += 1;
+      } else {
+        errors.push(`No se pudo guardar el movimiento: "${entry}"`);
+      }
+    }
 
     setIsSavingQuick(false);
 
-    if (!result) {
+    if (movementCount > 0 || billCount > 0) {
+      setQuickText("");
+    }
+
+    const successParts = [];
+
+    if (movementCount > 0) {
+      successParts.push(`${movementCount} movimiento(s)`);
+    }
+
+    if (billCount > 0) {
+      successParts.push(`${billCount} vencimiento(s)`);
+    }
+
+    if (errors.length > 0) {
+      setMessage(
+        `${successParts.length > 0 ? `Guardado: ${successParts.join(" y ")}. ` : ""}${errors.join(" | ")}`,
+      );
       return;
     }
 
-    setQuickText("");
-    setMessage("Movimiento rápido agregado al mapa.");
+    setMessage(`Guardado: ${successParts.join(" y ")}.`);
   }
 
   async function handleManualSubmit(event: FormEvent<HTMLFormElement>) {
@@ -589,14 +820,16 @@ export default function SpaceDetailPage() {
               >
                 <h2 className="text-2xl font-bold">Registro rápido</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Escribe un movimiento como lo dirías normalmente. La app intenta
-                  detectar monto, tipo y categoría.
+                  Escribe un movimiento o vencimiento por línea. La app intenta
+                  detectar monto, tipo, categoría y fecha.
                 </p>
 
                 <textarea
                   value={quickText}
                   onChange={(event) => setQuickText(event.target.value)}
-                  placeholder="Ej: mercado 320000 alimentación&#10;Ej: sueldo 4000000 ingreso&#10;Ej: uber 25000 transporte"
+                  placeholder={
+                    "Ej: mercado 320000 alimentación\nEj: sueldo 4000000 ingreso\nEj: internet 120000 vence 30 junio\nEj: tarjeta 350000 vence mañana"
+                  }
                   rows={6}
                   className="mt-6 w-full rounded-3xl border border-white/10 bg-slate-950 px-4 py-4 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
                 />
@@ -620,10 +853,10 @@ export default function SpaceDetailPage() {
                     sueldo 4000000 ingreso
                   </p>
                   <p className="rounded-2xl bg-slate-950 p-4">
-                    uber 25000 transporte
+                    internet 120000 vence 30 junio
                   </p>
                   <p className="rounded-2xl bg-slate-950 p-4">
-                    arriendo 1200000 hogar
+                    tarjeta 350000 vence mañana
                   </p>
                 </div>
               </article>
@@ -708,7 +941,7 @@ export default function SpaceDetailPage() {
               </ListCard>
             </section>
           )}
-          
+
           {activeTab === "bills" && (
             <BillsPanel spaceId={spaceId} userId={userId} />
           )}
