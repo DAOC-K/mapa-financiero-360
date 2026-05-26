@@ -1,12 +1,13 @@
 "use client";
 
+import BillsPanel from "@/components/BillsPanel";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import SimplePage from "@/components/SimplePage";
 import { createClient } from "@/lib/supabase/client";
 
-type Tab = "summary" | "quick" | "movements" | "goals" | "members";
+type Tab = "summary" | "quick" | "movements" | "bills" | "goals" | "members";
 
 type Space = {
   id: string;
@@ -71,6 +72,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "summary", label: "Resumen" },
   { id: "quick", label: "Registro rápido" },
   { id: "movements", label: "Movimientos" },
+  { id: "bills", label: "Vencimientos" },
   { id: "goals", label: "Metas" },
   { id: "members", label: "Miembros" },
 ];
@@ -705,6 +707,10 @@ export default function SpaceDetailPage() {
                 )}
               </ListCard>
             </section>
+          )}
+          
+          {activeTab === "bills" && (
+            <BillsPanel spaceId={spaceId} userId={userId} />
           )}
 
           {activeTab === "goals" && (
