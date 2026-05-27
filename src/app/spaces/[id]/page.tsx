@@ -44,6 +44,21 @@ type Goal = {
   created_at: string;
 };
 
+type Bill = {
+  id: string;
+  space_id: string;
+  user_id: string;
+  name: string;
+  amount: number;
+  category: string;
+  due_date: string;
+  status: "pending" | "paid";
+  is_recurring: boolean;
+  notes: string | null;
+  paid_at: string | null;
+  created_at: string;
+};
+
 type SpaceMember = {
   space_id: string;
   user_id: string;
