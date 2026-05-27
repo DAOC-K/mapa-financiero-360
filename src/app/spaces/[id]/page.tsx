@@ -318,6 +318,57 @@ function parseQuickBill(text: string) {
   };
 }
 
+function isLikelyMoneyToken(token: string) {
+  const cleanToken = token.replace(/[^\d]/g, "");
+
+  if (!cleanToken) {
+    return false;
+  }
+
+  const value = Number(cleanToken);
+
+  return value >= 1000;
+}
+
+function splitCompactQuickEntry(entry: string) {
+  const cleanEntry = entry.trim();
+
+  if (!cleanEntry) {
+    return [];
+  }
+
+  const tokens = cleanEntry.split(/\s+/).filter(Boolean);
+
+  const amountIndexes = tokens
+    .map((token, index) => (isLikelyMoneyToken(token) ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (amountIndexes.length <= 1) {
+    return [cleanEntry];
+  }
+
+  return amountIndexes
+    .map((amountIndex, index) => {
+      const start = index === 0 ? 0 : Math.max(0, amountIndex - 1);
+      const nextAmountIndex = amountIndexes[index + 1];
+      const end =
+        nextAmountIndex === undefined
+          ? tokens.length - 1
+          : Math.max(start, nextAmountIndex - 2);
+
+      return tokens.slice(start, end + 1).join(" ").trim();
+    })
+    .filter(Boolean);
+}
+
+function getQuickEntries(text: string) {
+  return text
+    .split(/\n|;/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .flatMap((entry) => splitCompactQuickEntry(entry));
+}
+
 export default function SpaceDetailPage() {
   const params = useParams<{ id: string }>();
   const spaceId = params.id;
@@ -565,11 +616,9 @@ export default function SpaceDetailPage() {
   async function handleQuickSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const entries = quickText
-      .split(/\n|;/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-
+    const entries = getQuickEntries(quickText)
+      
+    
     if (entries.length === 0) {
       setMessage("Escribe al menos un movimiento o vencimiento.");
       return;
