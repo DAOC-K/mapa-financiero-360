@@ -77,6 +77,12 @@ type SpaceInvitation = {
   accepted_at: string | null;
 };
 
+type Insight = {
+  title: string;
+  description: string;
+  tone: "success" | "warning" | "info";
+};
+
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
   currency: "COP",
@@ -650,6 +656,119 @@ export default function SpaceDetailPage() {
     };
   }, [transactions, goals, members, invitations, bills]);
 
+  const insights = useMemo<Insight[]>(() => {
+    const items: Insight[] = [];
+
+    const expenseByCategory = transactions
+      .filter((transaction) => transaction.type === "expense")
+      .reduce<Record<string, number>>((acc, transaction) => {
+        const category = transaction.category || "General";
+        acc[category] = (acc[category] ?? 0) + Number(transaction.amount);
+        return acc;
+      }, {});
+
+    const topExpenseCategory = Object.entries(expenseByCategory).sort(
+      ([, amountA], [, amountB]) => amountB - amountA,
+    )[0];
+
+    const projectedAfterBills =
+      summary.available - Number(summary.pendingBillAmount ?? 0);
+
+    if (summary.overdueBillsCount > 0) {
+      items.push({
+        title: "Tienes vencimientos atrasados",
+        description: `${summary.overdueBillsCount} pago(s) están fuera de fecha. Revisa la pestaña Vencimientos para ponerlos al día.`,
+        tone: "warning",
+      });
+    }
+
+    if (summary.pendingBillsCount > 0) {
+      items.push({
+        title: "Pagos pendientes del mapa",
+        description: `Tienes ${summary.pendingBillsCount} vencimiento(s) pendiente(s) por ${moneyFormatter.format(
+          summary.pendingBillAmount,
+        )}.`,
+        tone: "info",
+      });
+    }
+
+    if (summary.nextBillAmount > 0) {
+      items.push({
+        title: "Próximo pago importante",
+        description: `Tu próximo pago es ${summary.nextBillName} por ${moneyFormatter.format(
+          summary.nextBillAmount,
+        )}.`,
+        tone: "info",
+      });
+    }
+
+    if (summary.pendingBillAmount > 0) {
+      items.push({
+        title:
+          projectedAfterBills >= 0
+            ? "Puedes cubrir tus vencimientos"
+            : "Tus vencimientos superan tu disponible",
+        description:
+          projectedAfterBills >= 0
+            ? `Después de pagar vencimientos te quedarían aproximadamente ${moneyFormatter.format(
+              projectedAfterBills,
+            )}.`
+            : `Después de pagar vencimientos quedarías en ${moneyFormatter.format(
+              projectedAfterBills,
+            )}. Conviene revisar gastos o priorizar pagos.`,
+        tone: projectedAfterBills >= 0 ? "success" : "warning",
+      });
+    }
+
+    if (topExpenseCategory) {
+      const [category, amount] = topExpenseCategory;
+
+      items.push({
+        title: "Categoría con mayor gasto",
+        description: `Tu mayor gasto registrado está en ${category}, con ${moneyFormatter.format(
+          amount,
+        )}.`,
+        tone: "info",
+      });
+    }
+
+    if (summary.available > 0 && summary.pendingBillsCount === 0) {
+      items.push({
+        title: "Buen margen disponible",
+        description: `Tienes ${moneyFormatter.format(
+          summary.available,
+        )} disponibles y no hay vencimientos pendientes registrados.`,
+        tone: "success",
+      });
+    }
+
+    if (summary.goalsCount === 0) {
+      items.push({
+        title: "Aún no tienes metas en este mapa",
+        description:
+          "Crea una meta para que el mapa no solo registre gastos, sino que también te ayude a avanzar.",
+        tone: "info",
+      });
+    }
+
+    if (items.length === 0) {
+      items.push({
+        title: "Mapa financiero estable",
+        description:
+          "No hay alertas importantes por ahora. Sigue registrando movimientos para obtener mejores recomendaciones.",
+        tone: "success",
+      });
+    }
+
+    return items;
+  }, [summary, transactions]);
+
+  type Insight = {
+    title: string;
+    description: string;
+    tone: "success" | "warning" | "info";
+  };
+
   async function createTransaction(input: {
     name: string;
     type: "income" | "expense";
@@ -1029,6 +1148,7 @@ export default function SpaceDetailPage() {
                   detail={moneyFormatter.format(summary.nextBillAmount)}
                 />
               </section>
+              <FinancialInsights insights={insights} />
             </>
           )}
 
@@ -1393,4 +1513,58 @@ function EmptyText({ text }: { text: string }) {
       {text}
     </p>
   );
+}
+
+function FinancialInsights({ insights }: { insights: Insight[] }) {
+  return (
+    <section className="rounded-3xl border border-white/10 bg-slate-900 p-6">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-emerald-300">
+            Análisis
+          </p>
+          <h2 className="mt-2 text-2xl font-bold">Alertas inteligentes</h2>
+        </div>
+
+        <p className="text-sm text-slate-400">
+          Lectura automática del estado financiero de este mapa.
+        </p>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        {insights.map((insight) => (
+          <article
+            key={`${insight.title}-${insight.description}`}
+            className={`rounded-3xl border p-5 ${insight.tone === "warning"
+              ? "border-red-400/30 bg-red-400/10"
+              : insight.tone === "success"
+                ? "border-emerald-400/30 bg-emerald-400/10"
+                : "border-white/10 bg-slate-950"
+              }`}
+          >
+            <span
+              className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${insight.tone === "warning"
+                ? "bg-red-400/10 text-red-300"
+                : insight.tone === "success"
+                  ? "bg-emerald-400/10 text-emerald-300"
+                  : "bg-sky-400/10 text-sky-300"
+                }`}
+            >
+              {insight.tone === "warning"
+                ? "Atención"
+                : insight.tone === "success"
+                  ? "Bien"
+                  : "Dato"}
+            </span>
+
+            <h3 className="mt-4 text-lg font-bold">{insight.title}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              {insight.description}
+            </p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+
 }
