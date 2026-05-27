@@ -328,6 +328,7 @@ export default function SpaceDetailPage() {
   const [space, setSpace] = useState<Space | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [bills, setBills] = useState<Bill[]>([]);
   const [members, setMembers] = useState<SpaceMember[]>([]);
   const [invitations, setInvitations] = useState<SpaceInvitation[]>([]);
 
@@ -411,6 +412,18 @@ export default function SpaceDetailPage() {
       return;
     }
 
+    const { data: billsData, error: billsError } = await supabase
+      .from("bills")
+      .select("*")
+      .eq("space_id", spaceId)
+      .order("due_date", { ascending: true });
+
+    if (billsError) {
+      setMessage(billsError.message);
+      setIsLoading(false);
+      return;
+    }
+
     const { data: membersData } = await supabase
       .from("space_members")
       .select("*")
@@ -431,6 +444,7 @@ export default function SpaceDetailPage() {
     setSpace(spaceData);
     setTransactions(transactionsData ?? []);
     setGoals(goalsData ?? []);
+    setBills(billsData ?? []);
     setMembers(membersData ?? []);
     setInvitations(invitationsData);
     setIsLoading(false);
@@ -449,6 +463,17 @@ export default function SpaceDetailPage() {
       .filter((item) => item.type === "expense")
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
+    const today = new Date().toISOString().slice(0, 10);
+
+    const pendingBills = bills.filter((bill) => bill.status === "pending");
+    const overdueBills = pendingBills.filter((bill) => bill.due_date < today);
+    const nextBill = pendingBills[0];
+
+    const pendingBillAmount = pendingBills.reduce(
+      (sum, bill) => sum + Number(bill.amount),
+      0,
+    );
+
     return {
       income,
       expenses,
@@ -457,8 +482,13 @@ export default function SpaceDetailPage() {
       membersCount: Math.max(members.length, 1),
       pendingInvitations: invitations.filter((item) => item.status === "pending")
         .length,
+      pendingBillsCount: pendingBills.length,
+      overdueBillsCount: overdueBills.length,
+      pendingBillAmount,
+      nextBillName: nextBill?.name ?? "Sin pagos pendientes",
+      nextBillAmount: nextBill ? Number(nextBill.amount) : 0,
     };
-  }, [transactions, goals, members, invitations]);
+  }, [transactions, goals, members, invitations, bills]);
 
   async function createTransaction(input: {
     name: string;
@@ -758,11 +788,10 @@ export default function SpaceDetailPage() {
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-              activeTab === tab.id
-                ? "bg-emerald-400 text-slate-950"
-                : "border border-white/10 text-slate-300 hover:bg-white/10 hover:text-white"
-            }`}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${activeTab === tab.id
+              ? "bg-emerald-400 text-slate-950"
+              : "border border-white/10 text-slate-300 hover:bg-white/10 hover:text-white"
+              }`}
           >
             {tab.label}
           </button>
@@ -822,6 +851,25 @@ export default function SpaceDetailPage() {
                   title="Invitaciones"
                   value={String(summary.pendingInvitations)}
                   detail="Pendientes por aceptar"
+                />
+              </section>
+
+              <section className="grid gap-4 md:grid-cols-3">
+                <SummaryCard
+                  title="Vencimientos pendientes"
+                  value={String(summary.pendingBillsCount)}
+                  detail={moneyFormatter.format(summary.pendingBillAmount)}
+                />
+                <SummaryCard
+                  title="Vencidos"
+                  value={String(summary.overdueBillsCount)}
+                  detail="Pagos fuera de fecha"
+                  warning={summary.overdueBillsCount > 0}
+                />
+                <SummaryCard
+                  title="Próximo pago"
+                  value={summary.nextBillName}
+                  detail={moneyFormatter.format(summary.nextBillAmount)}
                 />
               </section>
             </>
@@ -1019,13 +1067,13 @@ export default function SpaceDetailPage() {
                     const progress =
                       Number(goal.target_amount) > 0
                         ? Math.min(
-                            Math.round(
-                              (Number(goal.current_amount) /
-                                Number(goal.target_amount)) *
-                                100,
-                            ),
+                          Math.round(
+                            (Number(goal.current_amount) /
+                              Number(goal.target_amount)) *
                             100,
-                          )
+                          ),
+                          100,
+                        )
                         : 0;
 
                     return (
@@ -1157,9 +1205,8 @@ function SummaryCard({
     <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
       <p className="text-sm text-slate-400">{title}</p>
       <p
-        className={`mt-2 break-words text-3xl font-black leading-tight ${
-          warning ? "text-red-300" : "text-white"
-        }`}
+        className={`mt-2 break-words text-3xl font-black leading-tight ${warning ? "text-red-300" : "text-white"
+          }`}
       >
         {value}
       </p>
