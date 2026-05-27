@@ -92,41 +92,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "members", label: "Miembros" },
 ];
 
-const spanishMonths: Record<string, number> = {
-  enero: 0,
-  febrero: 1,
-  marzo: 2,
-  abril: 3,
-  mayo: 4,
-  junio: 5,
-  julio: 6,
-  agosto: 7,
-  septiembre: 8,
-  setiembre: 8,
-  octubre: 9,
-  noviembre: 10,
-  diciembre: 11,
-};
 
-function detectTransactionType(text: string): "income" | "expense" {
-  const lower = text.toLowerCase();
-
-  const incomeWords = [
-    "sueldo",
-    "salario",
-    "ingreso",
-    "pago",
-    "freelance",
-    "venta",
-    "comision",
-    "comisión",
-    "bono",
-  ];
-
-  return incomeWords.some((word) => lower.includes(word))
-    ? "income"
-    : "expense";
-}
 
 function detectCategory(text: string) {
   const lower = text.toLowerCase();
@@ -188,6 +154,154 @@ function detectCategory(text: string) {
   return "General";
 }
 
+function detectTransactionType(text: string): "income" | "expense" {
+  const lower = text.toLowerCase();
+
+  const incomeWords = [
+    "sueldo",
+    "salario",
+    "ingreso",
+    "pago",
+    "freelance",
+    "venta",
+    "comision",
+    "comisión",
+    "bono",
+  ];
+
+  return incomeWords.some((word) => lower.includes(word))
+    ? "income"
+    : "expense";
+}
+
+function cleanMoneyToken(token: string) {
+  return token.replace(/[^\d]/g, "");
+}
+
+function isLikelyMoneyToken(token: string) {
+  const cleanToken = cleanMoneyToken(token);
+
+  if (!cleanToken) {
+    return false;
+  }
+
+  const value = Number(cleanToken);
+
+  return value >= 1000;
+}
+
+function isDueKeyword(token: string) {
+  const cleanToken = token.toLowerCase();
+
+  return (
+    cleanToken === "vence" ||
+    cleanToken === "vencimiento" ||
+    cleanToken === "para"
+  );
+}
+
+function getDueDateTokenCount(tokens: string[], startIndex: number) {
+  const first = tokens[startIndex]?.toLowerCase();
+
+  if (!first) {
+    return 0;
+  }
+
+  if (first === "hoy" || first === "mañana" || first === "manana") {
+    return 1;
+  }
+
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(first)) {
+    return 1;
+  }
+
+  if (/^\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?$/.test(first)) {
+    return 1;
+  }
+
+  const second = tokens[startIndex + 1]?.toLowerCase();
+
+  if (/^\d{1,2}$/.test(first) && second) {
+    if (second === "de") {
+      return tokens[startIndex + 2] ? 3 : 1;
+    }
+
+    return 2;
+  }
+
+  return 1;
+}
+
+function splitCompactQuickEntry(entry: string) {
+  const tokens = entry.trim().split(/\s+/).filter(Boolean);
+
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  const amountIndexes = tokens
+    .map((token, index) => (isLikelyMoneyToken(token) ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (amountIndexes.length <= 1) {
+    return [entry.trim()];
+  }
+
+  const entries: string[] = [];
+  let start = 0;
+  let pointer = 0;
+
+  while (pointer < amountIndexes.length) {
+    const amountIndex = amountIndexes[pointer];
+
+    if (amountIndex < start) {
+      pointer += 1;
+      continue;
+    }
+
+    let end = amountIndex;
+    const nextToken = tokens[amountIndex + 1]?.toLowerCase();
+
+    if (nextToken && isDueKeyword(nextToken)) {
+      const dueTokens = getDueDateTokenCount(tokens, amountIndex + 2);
+      end = amountIndex + 1 + dueTokens;
+    } else if (
+      nextToken === "fecha" &&
+      tokens[amountIndex + 2]?.toLowerCase() === "limite"
+    ) {
+      const dueTokens = getDueDateTokenCount(tokens, amountIndex + 3);
+      end = amountIndex + 2 + dueTokens;
+    } else if (nextToken && !isLikelyMoneyToken(nextToken)) {
+      end = amountIndex + 1;
+    }
+
+    const item = tokens.slice(start, end + 1).join(" ").trim();
+
+    if (item) {
+      entries.push(item);
+    }
+
+    start = end + 1;
+
+    while (
+      pointer < amountIndexes.length &&
+      amountIndexes[pointer] <= end
+    ) {
+      pointer += 1;
+    }
+  }
+
+  return entries.filter(Boolean);
+}
+
+function getQuickEntries(text: string) {
+  return text
+    .split(/\n|;/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .flatMap((entry) => splitCompactQuickEntry(entry));
+}
+
 function parseQuickMovement(text: string) {
   const amountMatch = text.match(/(\d[\d.,]*)/);
   const amountText = amountMatch?.[1] ?? "";
@@ -205,6 +319,22 @@ function parseQuickMovement(text: string) {
     category: detectCategory(text),
   };
 }
+
+const spanishMonths: Record<string, number> = {
+  enero: 0,
+  febrero: 1,
+  marzo: 2,
+  abril: 3,
+  mayo: 4,
+  junio: 5,
+  julio: 6,
+  agosto: 7,
+  septiembre: 8,
+  setiembre: 8,
+  octubre: 9,
+  noviembre: 10,
+  diciembre: 11,
+};
 
 function toDateInputValue(date: Date) {
   const year = date.getFullYear();
@@ -290,83 +420,62 @@ function parseDueDate(text: string) {
 }
 
 function parseQuickBill(text: string) {
-  const amountMatch = text.match(/(\d[\d.,]*)/);
-  const amountText = amountMatch?.[1] ?? "";
-  const amount = Number(amountText.replace(/[.,]/g, ""));
-  const dueDate = parseDueDate(text);
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  const markerIndex = tokens.findIndex((token, index) => {
+    const lower = token.toLowerCase();
 
-  const cleanName = text
-    .replace(amountText, "")
-    .replace(/vence.+$/i, "")
-    .replace(/vencimiento.+$/i, "")
-    .replace(/fecha limite.+$/i, "")
-    .replace(/fecha límite.+$/i, "")
+    return (
+      isDueKeyword(lower) ||
+      lower === "vencimiento" ||
+      (lower === "fecha" &&
+        tokens[index + 1]?.toLowerCase() === "limite")
+    );
+  });
+
+  const amountIndexes = tokens
+    .map((token, index) => (isLikelyMoneyToken(token) ? index : -1))
+    .filter((index) => index >= 0);
+
+  const validAmountIndexes =
+    markerIndex >= 0
+      ? amountIndexes.filter((index) => index < markerIndex)
+      : amountIndexes;
+
+  const amountIndex =
+    validAmountIndexes.length > 0
+      ? validAmountIndexes[validAmountIndexes.length - 1]
+      : amountIndexes[0];
+
+  const amountText = amountIndex !== undefined ? tokens[amountIndex] : "";
+  const amount = Number(cleanMoneyToken(amountText));
+
+  const previousAmountIndexes = amountIndexes.filter(
+    (index) => index < amountIndex,
+  );
+
+  let nameTokens = tokens.slice(0, amountIndex);
+
+  if (previousAmountIndexes.length > 0 && amountIndex > 0) {
+    nameTokens = [tokens[amountIndex - 1]];
+  }
+
+  const name = nameTokens
+    .join(" ")
     .replace(/\s+/g, " ")
     .trim();
 
   const lower = text.toLowerCase();
 
   return {
-    name: cleanName || "Vencimiento rápido",
+    name: name || "Vencimiento rápido",
     amount,
     category: detectCategory(text),
-    dueDate,
+    dueDate: parseDueDate(text),
     isRecurring:
       lower.includes("mensual") ||
       lower.includes("recurrente") ||
       lower.includes("cada mes"),
   };
-}
-
-function isLikelyMoneyToken(token: string) {
-  const cleanToken = token.replace(/[^\d]/g, "");
-
-  if (!cleanToken) {
-    return false;
-  }
-
-  const value = Number(cleanToken);
-
-  return value >= 1000;
-}
-
-function splitCompactQuickEntry(entry: string) {
-  const cleanEntry = entry.trim();
-
-  if (!cleanEntry) {
-    return [];
-  }
-
-  const tokens = cleanEntry.split(/\s+/).filter(Boolean);
-
-  const amountIndexes = tokens
-    .map((token, index) => (isLikelyMoneyToken(token) ? index : -1))
-    .filter((index) => index >= 0);
-
-  if (amountIndexes.length <= 1) {
-    return [cleanEntry];
-  }
-
-  return amountIndexes
-    .map((amountIndex, index) => {
-      const start = index === 0 ? 0 : Math.max(0, amountIndex - 1);
-      const nextAmountIndex = amountIndexes[index + 1];
-      const end =
-        nextAmountIndex === undefined
-          ? tokens.length - 1
-          : Math.max(start, nextAmountIndex - 2);
-
-      return tokens.slice(start, end + 1).join(" ").trim();
-    })
-    .filter(Boolean);
-}
-
-function getQuickEntries(text: string) {
-  return text
-    .split(/\n|;/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .flatMap((entry) => splitCompactQuickEntry(entry));
 }
 
 export default function SpaceDetailPage() {
@@ -617,8 +726,7 @@ export default function SpaceDetailPage() {
     event.preventDefault();
 
     const entries = getQuickEntries(quickText)
-      
-    
+
     if (entries.length === 0) {
       setMessage("Escribe al menos un movimiento o vencimiento.");
       return;
