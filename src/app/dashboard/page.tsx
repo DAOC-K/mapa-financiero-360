@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import SimplePage from "@/components/SimplePage";
 import { createClient } from "@/lib/supabase/client";
@@ -70,7 +71,9 @@ export default function DashboardPage() {
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [monthlyDecisions, setMonthlyDecisions] = useState<MonthlyDecision[]>([]);
+  const [monthlyDecisions, setMonthlyDecisions] = useState<MonthlyDecision[]>(
+    [],
+  );
   const [decisionItems, setDecisionItems] = useState<DecisionItem[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -176,21 +179,15 @@ export default function DashboardPage() {
 
     const available = income - expenses;
 
-    const sharedBudget = spaces
-      .filter((space) => space.type === "shared")
-      .reduce((sum, space) => sum + Number(space.monthly_budget), 0);
+    const goalSavings = goals.reduce(
+      (sum, goal) => sum + Number(goal.current_amount),
+      0,
+    );
 
-    const distributed = decisionItems.reduce(
+    const assignedMoney = decisionItems.reduce(
       (sum, item) => sum + Number(item.amount),
       0,
     );
-
-    const availableForDecision = monthlyDecisions.reduce(
-      (sum, decision) => sum + Number(decision.available_amount),
-      0,
-    );
-
-    const decisionRemaining = availableForDecision - distributed;
 
     const savingLike = decisionItems
       .filter(
@@ -201,19 +198,23 @@ export default function DashboardPage() {
       )
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
-    const savingRatio = income > 0 ? savingLike / income : 0;
+    const savingAmount = Math.max(goalSavings, savingLike);
+
+    const estimatedAgendaPending = fixedExpenses;
+
+    const projectedAfterPayments = available - estimatedAgendaPending;
+
     const expenseRatio = income > 0 ? expenses / income : 0;
-    const availableRatio = income > 0 ? available / income : 0;
+    const savingRatio = income > 0 ? savingAmount / income : 0;
 
     const healthScore = Math.max(
       0,
       Math.min(
         100,
         Math.round(
-          50 +
-            Math.min(savingRatio, 0.3) * 80 +
-            Math.min(availableRatio, 0.3) * 70 -
-            Math.max(expenseRatio - 0.7, 0) * 80,
+          55 +
+            Math.min(savingRatio, 0.3) * 90 -
+            Math.max(expenseRatio - 0.65, 0) * 90,
         ),
       ),
     );
@@ -224,24 +225,24 @@ export default function DashboardPage() {
       fixedExpenses,
       variableExpenses,
       available,
-      sharedBudget,
-      distributed,
-      availableForDecision,
-      decisionRemaining,
+      savingAmount,
+      assignedMoney,
+      estimatedAgendaPending,
+      projectedAfterPayments,
       healthScore,
       goalsCount: goals.length,
       spacesCount: spaces.length,
     };
-  }, [transactions, goals, spaces, monthlyDecisions, decisionItems]);
+  }, [transactions, goals, decisionItems]);
 
   const latestTransactions = transactions.slice(0, 5);
   const latestGoals = goals.slice(0, 3);
-  const latestDecisionItems = decisionItems.slice(0, 4);
+  const latestSpaces = spaces.slice(0, 3);
 
   return (
     <SimplePage
       title="Inicio"
-      description="Resumen de tu dinero, movimientos, metas, pagos y recomendaciones para tomar mejores decisiones financieras."
+      description="Resumen de tu dinero, movimientos, agenda de pagos, metas y recomendaciones para tomar mejores decisiones financieras."
     >
       {message && (
         <section className="mb-6 rounded-3xl border border-white/10 bg-slate-900 p-6">
@@ -255,236 +256,265 @@ export default function DashboardPage() {
         </section>
       ) : (
         <div className="grid gap-6">
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <section className="rounded-3xl border border-emerald-400/30 bg-emerald-400/10 p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                  Disponible
+                </p>
+
+                <h2
+                  className={`mt-3 text-5xl font-black md:text-6xl ${
+                    summary.available < 0 ? "text-red-300" : "text-white"
+                  }`}
+                >
+                  {moneyFormatter.format(summary.available)}
+                </h2>
+
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+                  Dinero estimado después de tus ingresos y gastos registrados.
+                  Cuando conectemos la Agenda de pagos real, este cálculo será
+                  todavía más preciso.
+                </p>
+              </div>
+
+              <Link
+                href="/payments"
+                className="rounded-full bg-emerald-400 px-6 py-3 text-center font-semibold text-slate-950 transition hover:bg-emerald-300"
+              >
+                Ver agenda de pagos
+              </Link>
+            </div>
+          </section>
+
+          <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
             <SummaryCard
-              title="Ingresos del mes"
+              title="Ingresos"
               value={moneyFormatter.format(summary.income)}
               detail="Total de ingresos registrados"
+              tone="success"
             />
+
             <SummaryCard
-              title="Gastos del mes"
+              title="Gastos"
               value={moneyFormatter.format(summary.expenses)}
               detail="Total de gastos registrados"
+              tone="danger"
             />
+
             <SummaryCard
-              title="Disponible"
-              value={moneyFormatter.format(summary.available)}
-              detail="Ingresos menos gastos"
-              warning={summary.available < 0}
+              title="Ahorro / metas"
+              value={moneyFormatter.format(summary.savingAmount)}
+              detail="Aportes registrados en metas o decisiones"
+              tone="info"
             />
+
             <SummaryCard
-              title="Metas activas"
-              value={String(summary.goalsCount)}
-              detail="Metas personales y compartidas"
+              title="Salud financiera"
+              value={`${summary.healthScore}/100`}
+              detail="Puntaje estimado según gastos y ahorro"
+              tone="neutral"
             />
           </section>
 
           <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
             <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-              <p className="text-sm font-medium text-slate-400">
-                Espacios financieros
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-slate-400">
+                    Agenda de pagos
+                  </p>
+
+                  <h2 className="mt-2 text-2xl font-bold">
+                    Pagos pendientes estimados
+                  </h2>
+                </div>
+
+                <Link
+                  href="/payments"
+                  className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  Ver todos
+                </Link>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                <MiniMetric
+                  title="Estimado fijo"
+                  value={moneyFormatter.format(summary.estimatedAgendaPending)}
+                />
+                <MiniMetric
+                  title="Después de pagos"
+                  value={moneyFormatter.format(summary.projectedAfterPayments)}
+                  danger={summary.projectedAfterPayments < 0}
+                />
+                <MiniMetric
+                  title="Espacios"
+                  value={String(summary.spacesCount)}
+                />
+              </div>
+
+              <div className="mt-6 rounded-3xl border border-yellow-400/20 bg-yellow-400/10 p-5">
+                <p className="text-sm font-semibold text-yellow-200">
+                  Pendiente de conectar
+                </p>
+
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Esta tarjeta por ahora usa los gastos fijos registrados como
+                  estimación. En la siguiente fase la conectamos con la tabla
+                  real de Agenda de pagos.
+                </p>
+              </div>
+            </article>
+
+            <article className="rounded-3xl border border-violet-400/30 bg-violet-400/10 p-6">
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-300">
+                Recomendación IA
               </p>
-              <h2 className="mt-2 text-2xl font-bold">
-                Resumen de espacios
+
+              <h2 className="mt-3 text-2xl font-bold">
+                Revisa tus gastos variables.
               </h2>
 
-              <div className="mt-6 grid gap-4 xl:grid-cols-3">
-                <div className="rounded-2xl bg-slate-950 p-5">
-                  <p className="text-sm text-slate-400">Espacios creados</p>
-                  <p className="mt-2 text-2xl font-bold">
-                    {summary.spacesCount}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl bg-slate-950 p-5">
-                  <p className="text-sm text-slate-400">Total compartido</p>
-                  <p className="mt-2 text-2xl font-bold">
-                    {moneyFormatter.format(summary.sharedBudget)}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-emerald-400/40 bg-emerald-400/10 p-5">
-                  <p className="text-sm text-emerald-300">Disponible real</p>
-                  <p className="mt-2 text-2xl font-bold">
-                    {moneyFormatter.format(summary.available)}
-                  </p>
-                </div>
-              </div>
-            </article>
-
-            <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-              <p className="text-sm font-medium text-slate-400">
-                Salud financiera
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                Tus gastos variables suman{" "}
+                <strong>{moneyFormatter.format(summary.variableExpenses)}</strong>.
+                La IA podrá detectar categorías que subieron, gastos hormiga y
+                oportunidades reales de ahorro.
               </p>
-              <div className="mt-4 rounded-3xl bg-emerald-400 p-6 text-slate-950">
-                <p className="text-sm font-semibold">Puntaje estimado</p>
-                <p className="mt-1 text-5xl font-black">
-                  {summary.healthScore}/100
-                </p>
-                <p className="mt-3 text-sm font-medium">
-                  Cálculo básico según gastos, ahorro, inversión, metas y dinero
-                  disponible.
-                </p>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <Link
+                  href="/assistant"
+                  className="rounded-full bg-violet-400 px-5 py-3 text-center text-sm font-semibold text-slate-950 transition hover:bg-violet-300"
+                >
+                  Ver asistente IA
+                </Link>
+
+                <Link
+                  href="/transactions"
+                  className="rounded-full border border-white/10 px-5 py-3 text-center text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  Ver movimientos
+                </Link>
               </div>
             </article>
           </section>
 
           <section className="grid gap-6 xl:grid-cols-2">
-            <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-              <p className="text-sm font-medium text-slate-400">
-                Plan del mes
-              </p>
-              <h2 className="mt-2 text-2xl font-bold">Dinero asignado</h2>
-
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl bg-slate-950 p-5">
-                  <p className="text-sm text-slate-400">Distribuido</p>
-                  <p className="mt-2 text-2xl font-bold">
-                    {moneyFormatter.format(summary.distributed)}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl bg-slate-950 p-5">
-                  <p className="text-sm text-slate-400">Falta por asignar</p>
-                  <p
-                    className={`mt-2 text-2xl font-bold ${
-                      summary.decisionRemaining < 0
-                        ? "text-red-300"
-                        : "text-white"
-                    }`}
+            <ListCard
+              title="Actividad reciente"
+              actionHref="/transactions"
+              actionLabel="Ver movimientos"
+            >
+              {latestTransactions.length === 0 ? (
+                <EmptyText text="Aún no tienes movimientos registrados." />
+              ) : (
+                latestTransactions.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between rounded-2xl bg-slate-950 p-4"
                   >
-                    {moneyFormatter.format(summary.decisionRemaining)}
-                  </p>
-                </div>
-              </div>
+                    <div>
+                      <p className="font-semibold">{item.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {item.type === "income" ? "Ingreso" : "Gasto"} ·{" "}
+                        {item.category}
+                      </p>
+                    </div>
 
-              <div className="mt-6 space-y-3">
-                {latestDecisionItems.length === 0 ? (
-                  <p className="rounded-2xl bg-slate-950 p-4 text-sm text-slate-400">
-                    Aún no tienes asignaciones registradas.
-                  </p>
-                ) : (
-                  latestDecisionItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between rounded-2xl bg-slate-950 p-4"
+                    <span
+                      className={`font-bold ${
+                        item.type === "income"
+                          ? "text-emerald-300"
+                          : "text-red-300"
+                      }`}
                     >
-                      <div>
-                        <p className="font-semibold">{item.name}</p>
-                        <p className="text-xs text-slate-500">{item.type}</p>
+                      {item.type === "income" ? "+" : "-"}
+                      {moneyFormatter.format(Number(item.amount))}
+                    </span>
+                  </div>
+                ))
+              )}
+            </ListCard>
+
+            <ListCard
+              title="Metas destacadas"
+              actionHref="/goals"
+              actionLabel="Ver metas"
+            >
+              {latestGoals.length === 0 ? (
+                <EmptyText text="Aún no tienes metas registradas." />
+              ) : (
+                latestGoals.map((goal) => {
+                  const progress =
+                    Number(goal.target_amount) > 0
+                      ? Math.min(
+                          Math.round(
+                            (Number(goal.current_amount) /
+                              Number(goal.target_amount)) *
+                              100,
+                          ),
+                          100,
+                        )
+                      : 0;
+
+                  return (
+                    <div key={goal.id} className="rounded-2xl bg-slate-950 p-4">
+                      <div className="flex items-center justify-between">
+                        <p className="font-semibold">{goal.name}</p>
+                        <span className="font-bold text-emerald-300">
+                          {progress}%
+                        </span>
                       </div>
 
-                      <span className="font-bold text-emerald-300">
-                        {moneyFormatter.format(Number(item.amount))}
-                      </span>
+                      <p className="mt-2 text-sm text-slate-500">
+                        {moneyFormatter.format(Number(goal.current_amount))} de{" "}
+                        {moneyFormatter.format(Number(goal.target_amount))}
+                      </p>
+
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800">
+                        <div
+                          className="h-full rounded-full bg-emerald-400"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
                     </div>
-                  ))
-                )}
-              </div>
-            </article>
-
-            <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-              <p className="text-sm font-medium text-slate-400">
-                Flujo de gastos
-              </p>
-              <h2 className="mt-2 text-2xl font-bold">Fijos vs variables</h2>
-
-              <div className="mt-6 space-y-4">
-                <FlowBar
-                  title="Gastos fijos"
-                  amount={summary.fixedExpenses}
-                  total={summary.income}
-                />
-                <FlowBar
-                  title="Gastos variables"
-                  amount={summary.variableExpenses}
-                  total={summary.income}
-                />
-                <FlowBar
-                  title="Disponible"
-                  amount={Math.max(summary.available, 0)}
-                  total={summary.income}
-                />
-              </div>
-            </article>
+                  );
+                })
+              )}
+            </ListCard>
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-2">
-            <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-              <h2 className="text-2xl font-bold">Últimos movimientos</h2>
+          <ListCard
+            title="Espacios financieros"
+            actionHref="/spaces"
+            actionLabel="Ver espacios"
+          >
+            {latestSpaces.length === 0 ? (
+              <EmptyText text="Aún no tienes espacios financieros." />
+            ) : (
+              <div className="grid gap-4 md:grid-cols-3">
+                {latestSpaces.map((space) => (
+                  <Link
+                    key={space.id}
+                    href={`/spaces/${space.id}`}
+                    className="rounded-2xl border border-white/10 bg-slate-950 p-5 transition hover:border-emerald-400/50 hover:bg-white/5"
+                  >
+                    <p className="text-lg font-bold">{space.name}</p>
 
-              <div className="mt-6 space-y-3">
-                {latestTransactions.length === 0 ? (
-                  <p className="rounded-2xl bg-slate-950 p-4 text-sm text-slate-400">
-                    Aún no tienes movimientos registrados.
-                  </p>
-                ) : (
-                  latestTransactions.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between rounded-2xl bg-slate-950 p-4"
-                    >
-                      <div>
-                        <p className="font-semibold">{item.name}</p>
-                        <p className="text-xs text-slate-500">
-                          {item.type === "income" ? "Ingreso" : "Gasto"} ·{" "}
-                          {item.category}
-                        </p>
-                      </div>
+                    <p className="mt-2 text-sm text-slate-500">
+                      {space.type === "personal" ? "Personal" : "Compartido"}
+                    </p>
 
-                      <span className="font-bold">
-                        {moneyFormatter.format(Number(item.amount))}
-                      </span>
-                    </div>
-                  ))
-                )}
+                    <p className="mt-4 text-2xl font-black">
+                      {moneyFormatter.format(Number(space.monthly_budget))}
+                    </p>
+                  </Link>
+                ))}
               </div>
-            </article>
-
-            <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-              <h2 className="text-2xl font-bold">Metas destacadas</h2>
-
-              <div className="mt-6 space-y-3">
-                {latestGoals.length === 0 ? (
-                  <p className="rounded-2xl bg-slate-950 p-4 text-sm text-slate-400">
-                    Aún no tienes metas registradas.
-                  </p>
-                ) : (
-                  latestGoals.map((goal) => {
-                    const progress =
-                      Number(goal.target_amount) > 0
-                        ? Math.min(
-                            Math.round(
-                              (Number(goal.current_amount) /
-                                Number(goal.target_amount)) *
-                                100,
-                            ),
-                            100,
-                          )
-                        : 0;
-
-                    return (
-                      <div key={goal.id} className="rounded-2xl bg-slate-950 p-4">
-                        <div className="flex items-center justify-between">
-                          <p className="font-semibold">{goal.name}</p>
-                          <span className="font-bold text-emerald-300">
-                            {progress}%
-                          </span>
-                        </div>
-
-                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800">
-                          <div
-                            className="h-full rounded-full bg-emerald-400"
-                            style={{ width: `${progress}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </article>
-          </section>
+            )}
+          </ListCard>
         </div>
       )}
     </SimplePage>
@@ -495,58 +525,92 @@ function SummaryCard({
   title,
   value,
   detail,
-  warning = false,
+  tone,
 }: {
   title: string;
   value: string;
   detail: string;
-  warning?: boolean;
+  tone: "success" | "danger" | "info" | "neutral";
 }) {
+  const valueClass =
+    tone === "success"
+      ? "text-emerald-300"
+      : tone === "danger"
+        ? "text-red-300"
+        : tone === "info"
+          ? "text-sky-300"
+          : "text-white";
+
   return (
     <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
       <p className="text-sm text-slate-400">{title}</p>
-      <p
-        className={`mt-2 text-3xl font-black ${
-          warning ? "text-red-300" : "text-white"
-        }`}
-      >
-        {value}
-      </p>
+
+      <p className={`mt-2 break-words text-2xl font-black leading-tight md:text-3xl ${valueClass}`}>{value}</p>
+
       <p className="mt-3 text-sm leading-6 text-slate-500">{detail}</p>
     </article>
   );
 }
 
-function FlowBar({
+function MiniMetric({
   title,
-  amount,
-  total,
+  value,
+  danger = false,
 }: {
   title: string;
-  amount: number;
-  total: number;
+  value: string;
+  danger?: boolean;
 }) {
-  const percentage =
-    total > 0 ? Math.min(Math.round((amount / total) * 100), 100) : 0;
-
   return (
-    <div>
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-slate-300">{title}</span>
-        <span className="font-bold text-emerald-300">
-          {moneyFormatter.format(amount)}
-        </span>
-      </div>
+    <div className="rounded-2xl bg-slate-950 p-5">
+      <p className="text-sm text-slate-400">{title}</p>
 
-      <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-800">
-        <div
-          className="h-full rounded-full bg-emerald-400"
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-
-      <p className="mt-1 text-xs text-slate-500">{percentage}% del ingreso</p>
+      <p
+        className={`mt-2 break-words text-lg font-bold leading-tight ${
+          danger ? "text-red-300" : "text-white"
+        }`}
+      >
+        {value}
+      </p>
     </div>
   );
 }
+
+function ListCard({
+  title,
+  actionHref,
+  actionLabel,
+  children,
+}: {
+  title: string;
+  actionHref: string;
+  actionLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-2xl font-bold">{title}</h2>
+
+        <Link
+          href={actionHref}
+          className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+        >
+          {actionLabel}
+        </Link>
+      </div>
+
+      <div className="mt-6 space-y-3">{children}</div>
+    </article>
+  );
+}
+
+function EmptyText({ text }: { text: string }) {
+  return (
+    <p className="rounded-2xl bg-slate-950 p-4 text-sm text-slate-400">
+      {text}
+    </p>
+  );
+}
+
 
