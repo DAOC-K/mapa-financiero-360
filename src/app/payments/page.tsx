@@ -161,6 +161,8 @@ export default function PaymentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
+  const [deleteTargetPayment, setDeleteTargetPayment] =
+    useState<PaymentItem | null>(null);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -539,19 +541,34 @@ export default function PaymentsPage() {
       "Pago omitido este mes.",
     );
   }
-  async function deletePayment(id: string) {
-    const confirmDelete = window.confirm(
-      "¿Seguro que quieres eliminar este pago? Esta acción no se puede deshacer.",
-    );
+  function requestDeletePayment(payment: PaymentItem) {
+    setDeleteTargetPayment(payment);
+    setMessage("");
+  }
 
-    if (!confirmDelete) {
+  function cancelDeletePayment() {
+    if (isUpdating) {
       return;
     }
 
-    setIsUpdating(id);
+    setDeleteTargetPayment(null);
+  }
+
+  async function confirmDeletePayment() {
+    if (!deleteTargetPayment) {
+      return;
+    }
+
+    const paymentId = deleteTargetPayment.id;
+    const paymentName = deleteTargetPayment.name;
+
+    setIsUpdating(paymentId);
     setMessage("");
 
-    const { error } = await supabase.from("payment_items").delete().eq("id", id);
+    const { error } = await supabase
+      .from("payment_items")
+      .delete()
+      .eq("id", paymentId);
 
     setIsUpdating(null);
 
@@ -560,21 +577,89 @@ export default function PaymentsPage() {
       return;
     }
 
-    setPayments((current) => current.filter((payment) => payment.id !== id));
+    setPayments((current) =>
+      current.filter((payment) => payment.id !== paymentId),
+    );
 
-    if (editingPaymentId === id) {
+    if (editingPaymentId === paymentId) {
       cancelEditingPayment();
     }
 
-    setMessage("Pago eliminado correctamente.");
+    setDeleteTargetPayment(null);
+    setMessage(`"${paymentName}" eliminado correctamente.`);
   }
-
   return (
     <SimplePage
       title="Agenda de pagos"
       description="Controla tus pagos fijos, deudas temporales, cuotas, vencidos y pagados sin perder de vista cuánto te queda disponible."
     >
       <div className="grid gap-6">
+        {deleteTargetPayment && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-[2rem] border border-red-400/30 bg-slate-950 p-6 shadow-2xl shadow-red-950/40">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-400/10 text-2xl">
+                ⚠️
+              </div>
+
+              <div className="mt-5 text-center">
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-red-300">
+                  Eliminar pago de la agenda
+                </p>
+
+                <h2 className="mt-3 text-2xl font-black text-white">
+                  ¿Eliminar "{deleteTargetPayment.name}"?
+                </h2>
+
+                <p className="mt-3 text-sm leading-6 text-slate-400">
+                  Esta acción no se puede deshacer. Si este pago pertenece a una
+                  deuda, cuota o servicio recurrente, se eliminará de tu agenda.
+                </p>
+              </div>
+
+              <div className="mt-6 rounded-3xl border border-white/10 bg-slate-900 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-white">
+                      {deleteTargetPayment.name}
+                    </p>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      {deleteTargetPayment.category} ·{" "}
+                      {getKindLabel(deleteTargetPayment.payment_kind)}
+                    </p>
+                  </div>
+
+                  <p className="text-lg font-black text-white">
+                    {moneyFormatter.format(Number(deleteTargetPayment.amount))}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={cancelDeletePayment}
+                  disabled={Boolean(isUpdating)}
+                  className="rounded-full border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={confirmDeletePayment}
+                  disabled={isUpdating === deleteTargetPayment.id}
+                  className="rounded-full bg-red-400 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isUpdating === deleteTargetPayment.id
+                    ? "Eliminando..."
+                    : "Sí, eliminar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
           <SummaryCard
             title="Pendiente"
@@ -877,7 +962,7 @@ export default function PaymentsPage() {
                     onPostpone={() => postponePayment(payment)}
                     onOmit={() => omitPayment(payment)}
                     onEdit={() => startEditingPayment(payment)}
-                    onDelete={() => deletePayment(payment.id)}
+                    onDelete={() => requestDeletePayment(payment)}
                   />
                 ))
               )}
@@ -1125,6 +1210,7 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
+
 
 
 
