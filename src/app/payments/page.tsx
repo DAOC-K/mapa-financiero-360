@@ -80,7 +80,7 @@ const projectedAvailable = 2000000 - pendingTotal - overdueTotal;
 export default function PaymentsPage() {
   return (
     <SimplePage
-      title="Pagos del mes"
+      title="Agenda de pagos"
       description="Controla tus pagos fijos, deudas temporales, cuotas, vencidos y pagados sin perder de vista cuánto te queda disponible."
     >
       <div className="grid gap-6">
