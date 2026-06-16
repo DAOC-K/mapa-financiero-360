@@ -59,11 +59,50 @@ type DecisionItem = {
   created_at: string;
 };
 
+type PaymentStatus = "pending" | "overdue" | "paid" | "omitted" | "postponed";
+
+type PaymentItem = {
+  id: string;
+  space_id: string;
+  user_id: string;
+  name: string;
+  amount: number;
+  category: string;
+  payment_kind: "recurrent" | "temporary" | "single";
+  status: PaymentStatus;
+  due_date: string | null;
+  paid_at: string | null;
+  postponed_to: string | null;
+  installment_number: number | null;
+  installment_total: number | null;
+  total_amount: number | null;
+  remaining_amount: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
   currency: "COP",
   maximumFractionDigits: 0,
 });
+
+function todayValue() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getEffectivePaymentStatus(payment: PaymentItem): PaymentStatus {
+  if (payment.status === "paid" || payment.status === "omitted") {
+    return payment.status;
+  }
+
+  if (payment.due_date && payment.due_date < todayValue()) {
+    return "overdue";
+  }
+
+  return payment.status;
+}
 
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -75,6 +114,7 @@ export default function DashboardPage() {
     [],
   );
   const [decisionItems, setDecisionItems] = useState<DecisionItem[]>([]);
+  const [payments, setPayments] = useState<PaymentItem[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -129,6 +169,17 @@ export default function DashboardPage() {
         return;
       }
 
+      const { data: paymentsData, error: paymentsError } = await supabase
+        .from("payment_items")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (paymentsError) {
+        setMessage(paymentsError.message);
+        setIsLoading(false);
+        return;
+      }
+
       const decisionIds = (decisionsData ?? []).map((decision) => decision.id);
 
       let itemsData: DecisionItem[] = [];
@@ -154,6 +205,7 @@ export default function DashboardPage() {
       setGoals(goalsData ?? []);
       setMonthlyDecisions(decisionsData ?? []);
       setDecisionItems(itemsData);
+      setPayments((paymentsData ?? []) as PaymentItem[]);
       setIsLoading(false);
     }
 
@@ -184,11 +236,6 @@ export default function DashboardPage() {
       0,
     );
 
-    const assignedMoney = decisionItems.reduce(
-      (sum, item) => sum + Number(item.amount),
-      0,
-    );
-
     const savingLike = decisionItems
       .filter(
         (item) =>
@@ -200,9 +247,26 @@ export default function DashboardPage() {
 
     const savingAmount = Math.max(goalSavings, savingLike);
 
-    const estimatedAgendaPending = fixedExpenses;
+    const pendingPayments = payments
+      .filter((payment) => getEffectivePaymentStatus(payment) === "pending")
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const projectedAfterPayments = available - estimatedAgendaPending;
+    const postponedPayments = payments
+      .filter((payment) => getEffectivePaymentStatus(payment) === "postponed")
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+
+    const overduePayments = payments
+      .filter((payment) => getEffectivePaymentStatus(payment) === "overdue")
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+
+    const paidPayments = payments
+      .filter((payment) => getEffectivePaymentStatus(payment) === "paid")
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+
+    const activeAgendaTotal =
+      pendingPayments + postponedPayments + overduePayments;
+
+    const projectedAfterAgenda = available - activeAgendaTotal;
 
     const expenseRatio = income > 0 ? expenses / income : 0;
     const savingRatio = income > 0 ? savingAmount / income : 0;
@@ -226,18 +290,28 @@ export default function DashboardPage() {
       variableExpenses,
       available,
       savingAmount,
-      assignedMoney,
-      estimatedAgendaPending,
-      projectedAfterPayments,
+      pendingPayments,
+      postponedPayments,
+      overduePayments,
+      paidPayments,
+      activeAgendaTotal,
+      projectedAfterAgenda,
       healthScore,
       goalsCount: goals.length,
       spacesCount: spaces.length,
+      paymentsCount: payments.length,
     };
-  }, [transactions, goals, decisionItems]);
+  }, [transactions, goals, decisionItems, payments]);
 
   const latestTransactions = transactions.slice(0, 5);
   const latestGoals = goals.slice(0, 3);
   const latestSpaces = spaces.slice(0, 3);
+  const latestPayments = payments
+    .filter((payment) => {
+      const status = getEffectivePaymentStatus(payment);
+      return status === "pending" || status === "overdue" || status === "postponed";
+    })
+    .slice(0, 4);
 
   return (
     <SimplePage
@@ -260,21 +334,22 @@ export default function DashboardPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
-                  Disponible
+                  Disponible después de agenda
                 </p>
 
                 <h2
                   className={`mt-3 text-5xl font-black md:text-6xl ${
-                    summary.available < 0 ? "text-red-300" : "text-white"
+                    summary.projectedAfterAgenda < 0
+                      ? "text-red-300"
+                      : "text-white"
                   }`}
                 >
-                  {moneyFormatter.format(summary.available)}
+                  {moneyFormatter.format(summary.projectedAfterAgenda)}
                 </h2>
 
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-                  Dinero estimado después de tus ingresos y gastos registrados.
-                  Cuando conectemos la Agenda de pagos real, este cálculo será
-                  todavía más preciso.
+                  Dinero estimado después de restar tus pagos pendientes,
+                  pospuestos y vencidos de la Agenda de pagos.
                 </p>
               </div>
 
@@ -303,16 +378,16 @@ export default function DashboardPage() {
             />
 
             <SummaryCard
-              title="Ahorro / metas"
-              value={moneyFormatter.format(summary.savingAmount)}
-              detail="Aportes registrados en metas o decisiones"
-              tone="info"
+              title="Agenda pendiente"
+              value={moneyFormatter.format(summary.activeAgendaTotal)}
+              detail="Pendientes, vencidos y pospuestos"
+              tone="warning"
             />
 
             <SummaryCard
               title="Salud financiera"
               value={`${summary.healthScore}/100`}
-              detail="Puntaje estimado según gastos y ahorro"
+              detail="Puntaje estimado según gastos, ahorro y agenda"
               tone="neutral"
             />
           </section>
@@ -326,7 +401,7 @@ export default function DashboardPage() {
                   </p>
 
                   <h2 className="mt-2 text-2xl font-bold">
-                    Pagos pendientes estimados
+                    Pagos reales de tu agenda
                   </h2>
                 </div>
 
@@ -340,30 +415,47 @@ export default function DashboardPage() {
 
               <div className="mt-6 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
                 <MiniMetric
-                  title="Estimado fijo"
-                  value={moneyFormatter.format(summary.estimatedAgendaPending)}
+                  title="Pendientes"
+                  value={moneyFormatter.format(
+                    summary.pendingPayments + summary.postponedPayments,
+                  )}
                 />
                 <MiniMetric
-                  title="Después de pagos"
-                  value={moneyFormatter.format(summary.projectedAfterPayments)}
-                  danger={summary.projectedAfterPayments < 0}
+                  title="Vencidos"
+                  value={moneyFormatter.format(summary.overduePayments)}
+                  danger={summary.overduePayments > 0}
                 />
                 <MiniMetric
-                  title="Espacios"
-                  value={String(summary.spacesCount)}
+                  title="Pagados"
+                  value={moneyFormatter.format(summary.paidPayments)}
                 />
               </div>
 
-              <div className="mt-6 rounded-3xl border border-yellow-400/20 bg-yellow-400/10 p-5">
-                <p className="text-sm font-semibold text-yellow-200">
-                  Pendiente de conectar
-                </p>
+              <div className="mt-6 space-y-3">
+                {latestPayments.length === 0 ? (
+                  <EmptyText text="No tienes pagos pendientes o vencidos en la agenda." />
+                ) : (
+                  latestPayments.map((payment) => (
+                    <div
+                      key={payment.id}
+                      className="flex items-center justify-between rounded-2xl bg-slate-950 p-4"
+                    >
+                      <div>
+                        <p className="font-semibold">{payment.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {payment.category} ·{" "}
+                          {payment.due_date
+                            ? `Vence: ${payment.due_date}`
+                            : "Sin fecha"}
+                        </p>
+                      </div>
 
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  Esta tarjeta por ahora usa los gastos fijos registrados como
-                  estimación. En la siguiente fase la conectamos con la tabla
-                  real de Agenda de pagos.
-                </p>
+                      <span className="font-bold text-yellow-200">
+                        {moneyFormatter.format(Number(payment.amount))}
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </article>
 
@@ -373,14 +465,14 @@ export default function DashboardPage() {
               </p>
 
               <h2 className="mt-3 text-2xl font-bold">
-                Revisa tus gastos variables.
+                Tu agenda ya impacta el disponible.
               </h2>
 
               <p className="mt-3 text-sm leading-6 text-slate-300">
-                Tus gastos variables suman{" "}
-                <strong>{moneyFormatter.format(summary.variableExpenses)}</strong>.
-                La IA podrá detectar categorías que subieron, gastos hormiga y
-                oportunidades reales de ahorro.
+                Tienes{" "}
+                <strong>{moneyFormatter.format(summary.activeAgendaTotal)}</strong>{" "}
+                en pagos pendientes, vencidos o pospuestos. La IA podrá sugerir
+                prioridades según fechas, monto y capacidad real de pago.
               </p>
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -392,10 +484,10 @@ export default function DashboardPage() {
                 </Link>
 
                 <Link
-                  href="/transactions"
+                  href="/payments"
                   className="rounded-full border border-white/10 px-5 py-3 text-center text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
                 >
-                  Ver movimientos
+                  Ver agenda
                 </Link>
               </div>
             </article>
@@ -530,7 +622,7 @@ function SummaryCard({
   title: string;
   value: string;
   detail: string;
-  tone: "success" | "danger" | "info" | "neutral";
+  tone: "success" | "danger" | "info" | "warning" | "neutral";
 }) {
   const valueClass =
     tone === "success"
@@ -539,13 +631,17 @@ function SummaryCard({
         ? "text-red-300"
         : tone === "info"
           ? "text-sky-300"
-          : "text-white";
+          : tone === "warning"
+            ? "text-yellow-200"
+            : "text-white";
 
   return (
     <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
       <p className="text-sm text-slate-400">{title}</p>
 
-      <p className={`mt-2 break-words text-2xl font-black leading-tight md:text-3xl ${valueClass}`}>{value}</p>
+      <p className={`mt-2 break-words text-2xl font-black leading-tight md:text-3xl ${valueClass}`}>
+        {value}
+      </p>
 
       <p className="mt-3 text-sm leading-6 text-slate-500">{detail}</p>
     </article>
@@ -612,5 +708,3 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
-
-
