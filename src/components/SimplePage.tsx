@@ -10,7 +10,7 @@ const appName = "Brújula";
 const navItems = [
   { href: "/dashboard", label: "Inicio", shortLabel: "Inicio" },
   { href: "/transactions", label: "Movimientos", shortLabel: "Mov." },
-  { href: "/spaces", label: "Espacios", shortLabel: "Espacios" },
+  { href: "/payments", label: "Pagos del mes", shortLabel: "Pagos" },
   { href: "/goals", label: "Metas", shortLabel: "Metas" },
   { href: "/settings", label: "Más", shortLabel: "Más" },
 ];
