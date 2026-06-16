@@ -82,11 +82,32 @@ type PaymentItem = {
   updated_at: string;
 };
 
+type AgendaPaymentItem = PaymentItem & {
+  is_projected?: boolean;
+  source_payment_id?: string;
+  projected_month?: string;
+};
+
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
   currency: "COP",
   maximumFractionDigits: 0,
 });
+
+const monthOptions = [
+  { value: "01", label: "Enero" },
+  { value: "02", label: "Febrero" },
+  { value: "03", label: "Marzo" },
+  { value: "04", label: "Abril" },
+  { value: "05", label: "Mayo" },
+  { value: "06", label: "Junio" },
+  { value: "07", label: "Julio" },
+  { value: "08", label: "Agosto" },
+  { value: "09", label: "Septiembre" },
+  { value: "10", label: "Octubre" },
+  { value: "11", label: "Noviembre" },
+  { value: "12", label: "Diciembre" },
+];
 
 function todayValue() {
   return new Date().toISOString().slice(0, 10);
@@ -104,6 +125,180 @@ function getEffectivePaymentStatus(payment: PaymentItem): PaymentStatus {
   return payment.status;
 }
 
+function getMonthInputValue() {
+  return todayValue().slice(0, 7);
+}
+
+function getMonthLabel(monthValue: string) {
+  const [year, month] = monthValue.split("-").map(Number);
+
+  if (!year || !month) {
+    return "este mes";
+  }
+
+  return new Intl.DateTimeFormat("es-CO", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, month - 1, 1));
+}
+
+function isSelectedMonthValue(dateValue: string | null, monthValue: string) {
+  if (!dateValue) {
+    return false;
+  }
+
+  return dateValue.slice(0, 7) === monthValue;
+}
+
+function isTransactionInMonth(transaction: Transaction, monthValue: string) {
+  return isSelectedMonthValue(transaction.date ?? transaction.created_at, monthValue);
+}
+
+function isPaymentAccountedInMonth(
+  payment: PaymentItem,
+  monthValue: string,
+) {
+  const effectiveStatus = getEffectivePaymentStatus(payment);
+
+  if (effectiveStatus === "paid") {
+    return isSelectedMonthValue(payment.paid_at, monthValue);
+  }
+
+  if (effectiveStatus === "omitted") {
+    return isSelectedMonthValue(payment.updated_at, monthValue);
+  }
+
+  return isSelectedMonthValue(payment.due_date, monthValue);
+}
+
+function getRecurrentSeriesKey(payment: PaymentItem) {
+  return [
+    payment.space_id,
+    payment.name.trim().toLowerCase(),
+    payment.category.trim().toLowerCase(),
+  ].join("|");
+}
+
+function getProjectedDueDate(payment: PaymentItem, monthValue: string) {
+  const [year, month] = monthValue.split("-").map(Number);
+  const originalDay = payment.due_date
+    ? Number(payment.due_date.slice(8, 10))
+    : 1;
+
+  const lastDayOfSelectedMonth = new Date(year, month, 0).getDate();
+  const safeDay = Math.min(originalDay || 1, lastDayOfSelectedMonth);
+
+  return `${monthValue}-${String(safeDay).padStart(2, "0")}`;
+}
+
+function sortDashboardAgendaPayments(items: AgendaPaymentItem[]) {
+  return [...items].sort((a, b) => {
+    const statusOrder: Record<PaymentStatus, number> = {
+      overdue: 1,
+      pending: 2,
+      postponed: 3,
+      paid: 4,
+      omitted: 5,
+    };
+
+    const statusDiff =
+      statusOrder[getEffectivePaymentStatus(a)] -
+      statusOrder[getEffectivePaymentStatus(b)];
+
+    if (statusDiff !== 0) {
+      return statusDiff;
+    }
+
+    const aDate = a.due_date ?? "9999-12-31";
+    const bDate = b.due_date ?? "9999-12-31";
+
+    return aDate.localeCompare(bDate);
+  });
+}
+
+function buildMonthlyDashboardAgendaPayments(
+  payments: PaymentItem[],
+  monthValue: string,
+): AgendaPaymentItem[] {
+  const actualMonthPayments = payments.filter((payment) =>
+    isPaymentAccountedInMonth(payment, monthValue),
+  );
+
+  const actualRecurrentKeys = new Set(
+    actualMonthPayments
+      .filter((payment) => payment.payment_kind === "recurrent")
+      .map(getRecurrentSeriesKey),
+  );
+
+  const recurrentTemplateByKey = new Map<string, PaymentItem>();
+  const recurrentFirstMonthByKey = new Map<string, string>();
+
+  for (const payment of payments) {
+    if (payment.payment_kind !== "recurrent") {
+      continue;
+    }
+
+    const key = getRecurrentSeriesKey(payment);
+    const paymentMonth =
+      payment.due_date?.slice(0, 7) ?? payment.created_at.slice(0, 7);
+
+    const currentFirstMonth = recurrentFirstMonthByKey.get(key);
+
+    if (!currentFirstMonth || paymentMonth < currentFirstMonth) {
+      recurrentFirstMonthByKey.set(key, paymentMonth);
+    }
+
+    const currentTemplate = recurrentTemplateByKey.get(key);
+
+    if (!currentTemplate) {
+      recurrentTemplateByKey.set(key, payment);
+      continue;
+    }
+
+    const paymentDueDate = payment.due_date ?? "";
+    const templateDueDate = currentTemplate.due_date ?? "";
+
+    if (
+      payment.updated_at > currentTemplate.updated_at ||
+      paymentDueDate > templateDueDate
+    ) {
+      recurrentTemplateByKey.set(key, payment);
+    }
+  }
+
+  const projectedPayments: AgendaPaymentItem[] = [];
+
+  for (const [key, template] of recurrentTemplateByKey.entries()) {
+    const firstMonth = recurrentFirstMonthByKey.get(key);
+
+    if (actualRecurrentKeys.has(key)) {
+      continue;
+    }
+
+    if (firstMonth && monthValue < firstMonth) {
+      continue;
+    }
+
+    projectedPayments.push({
+      ...template,
+      id: `projected-${key}-${monthValue}`,
+      status: "pending",
+      due_date: getProjectedDueDate(template, monthValue),
+      paid_at: null,
+      postponed_to: null,
+      created_at: `${monthValue}-01T00:00:00.000Z`,
+      updated_at: template.updated_at,
+      is_projected: true,
+      source_payment_id: template.id,
+      projected_month: monthValue,
+    });
+  }
+
+  return sortDashboardAgendaPayments([
+    ...actualMonthPayments,
+    ...projectedPayments,
+  ]);
+}
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -116,6 +311,7 @@ export default function DashboardPage() {
   const [decisionItems, setDecisionItems] = useState<DecisionItem[]>([]);
   const [payments, setPayments] = useState<PaymentItem[]>([]);
 
+  const [selectedMonth, setSelectedMonth] = useState(getMonthInputValue());
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -212,20 +408,81 @@ export default function DashboardPage() {
     loadDashboard();
   }, [supabase]);
 
+  const monthlyTransactions = useMemo(
+    () =>
+      transactions.filter((transaction) =>
+        isTransactionInMonth(transaction, selectedMonth),
+      ),
+    [transactions, selectedMonth],
+  );
+
+  const monthlyAgendaPayments = useMemo(
+    () => buildMonthlyDashboardAgendaPayments(payments, selectedMonth),
+    [payments, selectedMonth],
+  );
+
+  const selectedMonthParts = useMemo(() => {
+    const [selectedYear, selectedMonthNumber] = selectedMonth.split("-");
+
+    return {
+      selectedYear,
+      selectedMonthNumber,
+    };
+  }, [selectedMonth]);
+
+  const availableYears = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+
+    return Array.from({ length: 7 }, (_, index) =>
+      String(currentYear - 3 + index),
+    );
+  }, []);
+
+  function shiftSelectedMonth(months: number) {
+    const [year, month] = selectedMonth.split("-").map(Number);
+
+    if (!year || !month) {
+      setSelectedMonth(getMonthInputValue());
+      return;
+    }
+
+    const nextDate = new Date(year, month - 1 + months, 1);
+    const nextYear = nextDate.getFullYear();
+    const nextMonth = String(nextDate.getMonth() + 1).padStart(2, "0");
+
+    setSelectedMonth(`${nextYear}-${nextMonth}`);
+  }
+
+  function resetSelectedMonth() {
+    setSelectedMonth(getMonthInputValue());
+  }
+
+  function updateSelectedMonthPart(part: "year" | "month", value: string) {
+    const [currentYear, currentMonth] = getMonthInputValue().split("-");
+    const [selectedYear, selectedMonthNumber] = selectedMonth.split("-");
+
+    const nextYear = part === "year" ? value : selectedYear || currentYear;
+    const nextMonth =
+      part === "month"
+        ? value.padStart(2, "0")
+        : selectedMonthNumber || currentMonth;
+
+    setSelectedMonth(`${nextYear}-${nextMonth}`);
+  }
   const summary = useMemo(() => {
-    const income = transactions
+    const income = monthlyTransactions
       .filter((item) => item.type === "income")
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
-    const expenses = transactions
+    const expenses = monthlyTransactions
       .filter((item) => item.type === "expense")
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
-    const fixedExpenses = transactions
+    const fixedExpenses = monthlyTransactions
       .filter((item) => item.type === "expense" && item.is_fixed)
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
-    const variableExpenses = transactions
+    const variableExpenses = monthlyTransactions
       .filter((item) => item.type === "expense" && !item.is_fixed)
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
@@ -236,30 +493,37 @@ export default function DashboardPage() {
       0,
     );
 
+    const selectedDecisionIds = new Set(
+      monthlyDecisions
+        .filter((decision) => decision.month.slice(0, 7) === selectedMonth)
+        .map((decision) => decision.id),
+    );
+
     const savingLike = decisionItems
       .filter(
         (item) =>
-          item.type === "saving" ||
-          item.type === "investment" ||
-          item.type === "goal",
+          selectedDecisionIds.has(item.decision_id) &&
+          (item.type === "saving" ||
+            item.type === "investment" ||
+            item.type === "goal"),
       )
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
     const savingAmount = Math.max(goalSavings, savingLike);
 
-    const pendingPayments = payments
+    const pendingPayments = monthlyAgendaPayments
       .filter((payment) => getEffectivePaymentStatus(payment) === "pending")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const postponedPayments = payments
+    const postponedPayments = monthlyAgendaPayments
       .filter((payment) => getEffectivePaymentStatus(payment) === "postponed")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const overduePayments = payments
+    const overduePayments = monthlyAgendaPayments
       .filter((payment) => getEffectivePaymentStatus(payment) === "overdue")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const paidPayments = payments
+    const paidPayments = monthlyAgendaPayments
       .filter((payment) => getEffectivePaymentStatus(payment) === "paid")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
@@ -299,17 +563,29 @@ export default function DashboardPage() {
       healthScore,
       goalsCount: goals.length,
       spacesCount: spaces.length,
-      paymentsCount: payments.length,
+      paymentsCount: monthlyAgendaPayments.length,
     };
-  }, [transactions, goals, decisionItems, payments]);
+  }, [
+    monthlyTransactions,
+    goals,
+    monthlyDecisions,
+    decisionItems,
+    monthlyAgendaPayments,
+    spaces,
+    selectedMonth,
+  ]);
 
-  const latestTransactions = transactions.slice(0, 5);
+  const latestTransactions = monthlyTransactions.slice(0, 5);
   const latestGoals = goals.slice(0, 3);
   const latestSpaces = spaces.slice(0, 3);
-  const latestPayments = payments
+  const latestPayments = monthlyAgendaPayments
     .filter((payment) => {
       const status = getEffectivePaymentStatus(payment);
-      return status === "pending" || status === "overdue" || status === "postponed";
+      return (
+        status === "pending" ||
+        status === "overdue" ||
+        status === "postponed"
+      );
     })
     .slice(0, 4);
 
@@ -330,6 +606,83 @@ export default function DashboardPage() {
         </section>
       ) : (
         <div className="grid gap-6">
+          <section className="rounded-3xl border border-white/10 bg-slate-900 p-5">
+            <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                  Periodo de inicio
+                </p>
+
+                <h2 className="mt-2 text-2xl font-black capitalize">
+                  {getMonthLabel(selectedMonth)}
+                </h2>
+
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                  Inicio usa movimientos reales del mes y pagos recurrentes
+                  esperados. Los pagos pagados no se arrastran como pagados a
+                  otros meses.
+                </p>
+              </div>
+
+              <div className="rounded-[2rem] border border-white/10 bg-slate-950/70 p-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => shiftSelectedMonth(-1)}
+                    className="rounded-full border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                  >
+                    ←
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={resetSelectedMonth}
+                    className="rounded-full bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
+                  >
+                    Este mes
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => shiftSelectedMonth(1)}
+                    className="rounded-full border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                  >
+                    →
+                  </button>
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <select
+                    value={selectedMonthParts.selectedMonthNumber}
+                    onChange={(event) =>
+                      updateSelectedMonthPart("month", event.target.value)
+                    }
+                    className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-emerald-400"
+                  >
+                    {monthOptions.map((month) => (
+                      <option key={month.value} value={month.value}>
+                        {month.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={selectedMonthParts.selectedYear}
+                    onChange={(event) =>
+                      updateSelectedMonthPart("year", event.target.value)
+                    }
+                    className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-emerald-400"
+                  >
+                    {availableYears.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </section>
           <section className="rounded-3xl border border-emerald-400/30 bg-emerald-400/10 p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
@@ -366,14 +719,14 @@ export default function DashboardPage() {
             <SummaryCard
               title="Ingresos"
               value={moneyFormatter.format(summary.income)}
-              detail="Total de ingresos registrados"
+              detail="Ingresos registrados en el periodo"
               tone="success"
             />
 
             <SummaryCard
               title="Gastos"
               value={moneyFormatter.format(summary.expenses)}
-              detail="Total de gastos registrados"
+              detail="Gastos registrados en el periodo"
               tone="danger"
             />
 
@@ -401,7 +754,7 @@ export default function DashboardPage() {
                   </p>
 
                   <h2 className="mt-2 text-2xl font-bold">
-                    Pagos reales de tu agenda
+                    Pagos del periodo
                   </h2>
                 </div>
 
@@ -433,7 +786,7 @@ export default function DashboardPage() {
 
               <div className="mt-6 space-y-3">
                 {latestPayments.length === 0 ? (
-                  <EmptyText text="No tienes pagos pendientes o vencidos en la agenda." />
+                  <EmptyText text="No tienes pagos pendientes o vencidos en este periodo." />
                 ) : (
                   latestPayments.map((payment) => (
                     <div
@@ -443,6 +796,7 @@ export default function DashboardPage() {
                       <div>
                         <p className="font-semibold">{payment.name}</p>
                         <p className="text-xs text-slate-500">
+                          {payment.is_projected ? "Programado · " : ""}
                           {payment.category} ·{" "}
                           {payment.due_date
                             ? `Vence: ${payment.due_date}`
