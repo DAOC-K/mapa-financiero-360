@@ -79,6 +79,60 @@ function getKindLabel(kind: PaymentKind) {
   return "Único";
 }
 
+function isNextMonthPayment(payment: PaymentItem) {
+  const effectiveStatus = getEffectiveStatus(payment);
+
+  if (
+    payment.payment_kind !== "recurrent" ||
+    effectiveStatus !== "pending" ||
+    !payment.due_date
+  ) {
+    return false;
+  }
+
+  const today = new Date(`${todayValue()}T00:00:00`);
+  const dueDate = new Date(`${payment.due_date}T00:00:00`);
+
+  return (
+    dueDate.getFullYear() > today.getFullYear() ||
+    (dueDate.getFullYear() === today.getFullYear() &&
+      dueDate.getMonth() > today.getMonth())
+  );
+}
+
+function getAgendaPriority(payment: PaymentItem) {
+  const effectiveStatus = getEffectiveStatus(payment);
+
+  if (effectiveStatus === "overdue") return 1;
+  if (effectiveStatus === "pending" && !isNextMonthPayment(payment)) return 2;
+  if (isNextMonthPayment(payment)) return 3;
+  if (effectiveStatus === "postponed") return 4;
+  if (effectiveStatus === "paid") return 5;
+  if (effectiveStatus === "omitted") return 6;
+
+  return 99;
+}
+
+function sortAgendaPayments(items: PaymentItem[]) {
+  return [...items].sort((a, b) => {
+    const priorityDiff = getAgendaPriority(a) - getAgendaPriority(b);
+
+    if (priorityDiff !== 0) {
+      return priorityDiff;
+    }
+
+    const aDate = a.due_date ?? "9999-12-31";
+    const bDate = b.due_date ?? "9999-12-31";
+    const dateDiff = aDate.localeCompare(bDate);
+
+    if (dateDiff !== 0) {
+      return dateDiff;
+    }
+
+    return b.created_at.localeCompare(a.created_at);
+  });
+}
+
 export default function PaymentsPage() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -192,6 +246,8 @@ export default function PaymentsPage() {
       projectedAvailable,
     };
   }, [payments]);
+
+  const sortedPayments = useMemo(() => sortAgendaPayments(payments), [payments]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -628,10 +684,10 @@ export default function PaymentsPage() {
             <div className="mt-6 space-y-4">
               {isLoading ? (
                 <EmptyText text="Cargando agenda de pagos..." />
-              ) : payments.length === 0 ? (
+              ) : sortedPayments.length === 0 ? (
                 <EmptyText text="Aún no tienes pagos en la agenda." />
               ) : (
-                payments.map((payment) => (
+                sortedPayments.map((payment) => (
                   <PaymentCard
                     key={payment.id}
                     payment={payment}
@@ -709,10 +765,7 @@ function PaymentCard({
             <h3 className="text-lg font-bold">{payment.name}</h3>
             <StatusBadge status={effectiveStatus} />
 
-            {payment.payment_kind === "recurrent" &&
-  effectiveStatus === "pending" &&
-  payment.due_date &&
-  payment.due_date > todayValue() && (
+            {isNextMonthPayment(payment) && (
     <span className="rounded-full bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-300">
       Próximo mes
     </span>
