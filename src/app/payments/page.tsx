@@ -39,11 +39,32 @@ type PaymentItem = {
   updated_at: string;
 };
 
+type AgendaPaymentItem = PaymentItem & {
+  is_projected?: boolean;
+  source_payment_id?: string;
+  projected_month?: string;
+};
+
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
   currency: "COP",
   maximumFractionDigits: 0,
 });
+
+const monthOptions = [
+  { value: "01", label: "Enero" },
+  { value: "02", label: "Febrero" },
+  { value: "03", label: "Marzo" },
+  { value: "04", label: "Abril" },
+  { value: "05", label: "Mayo" },
+  { value: "06", label: "Junio" },
+  { value: "07", label: "Julio" },
+  { value: "08", label: "Agosto" },
+  { value: "09", label: "Septiembre" },
+  { value: "10", label: "Octubre" },
+  { value: "11", label: "Noviembre" },
+  { value: "12", label: "Diciembre" },
+];
 
 function todayValue() {
   return new Date().toISOString().slice(0, 10);
@@ -133,47 +154,157 @@ function sortAgendaPayments(items: PaymentItem[]) {
   });
 }
 
-function getCurrentMonthEndValue() {
-  const today = new Date(`${todayValue()}T00:00:00`);
-  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  return endOfMonth.toISOString().slice(0, 10);
+function getMonthInputValue() {
+  return todayValue().slice(0, 7);
 }
 
-function isCurrentMonthValue(dateValue: string | null) {
+function getMonthBounds(monthValue: string) {
+  const [year, month] = monthValue.split("-").map(Number);
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
+
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
+}
+
+function getMonthLabel(monthValue: string) {
+  const [year, month] = monthValue.split("-").map(Number);
+
+  if (!year || !month) {
+    return "este mes";
+  }
+
+  return new Intl.DateTimeFormat("es-CO", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, month - 1, 1));
+}
+
+function isSelectedMonthValue(dateValue: string | null, monthValue: string) {
   if (!dateValue) {
     return false;
   }
 
-  const cleanDate = dateValue.slice(0, 10);
-  const today = new Date(`${todayValue()}T00:00:00`);
-  const date = new Date(`${cleanDate}T00:00:00`);
-
-  return (
-    date.getFullYear() === today.getFullYear() &&
-    date.getMonth() === today.getMonth()
-  );
+  return dateValue.slice(0, 7) === monthValue;
 }
 
-function isDueCurrentMonthOrPast(payment: PaymentItem) {
-  if (!payment.due_date) {
-    return true;
-  }
-
-  return payment.due_date <= getCurrentMonthEndValue();
-}
-
-function isPaymentAccountedThisMonth(payment: PaymentItem) {
+function isPaymentAccountedInMonth(
+  payment: PaymentItem,
+  monthValue: string,
+) {
   const effectiveStatus = getEffectiveStatus(payment);
 
   if (effectiveStatus === "paid") {
-    return isCurrentMonthValue(payment.paid_at ?? payment.due_date);
+    return isSelectedMonthValue(payment.paid_at, monthValue);
   }
 
   if (effectiveStatus === "omitted") {
-    return isCurrentMonthValue(payment.due_date ?? payment.updated_at);
+    return isSelectedMonthValue(payment.updated_at, monthValue);
   }
 
-  return isDueCurrentMonthOrPast(payment);
+  return isSelectedMonthValue(payment.due_date, monthValue);
+}
+function getRecurrentSeriesKey(payment: PaymentItem) {
+  return [
+    payment.space_id,
+    payment.name.trim().toLowerCase(),
+    payment.category.trim().toLowerCase(),
+  ].join("|");
+}
+
+function getProjectedDueDate(payment: PaymentItem, monthValue: string) {
+  const [year, month] = monthValue.split("-").map(Number);
+  const originalDay = payment.due_date
+    ? Number(payment.due_date.slice(8, 10))
+    : 1;
+
+  const lastDayOfSelectedMonth = new Date(year, month, 0).getDate();
+  const safeDay = Math.min(originalDay || 1, lastDayOfSelectedMonth);
+
+  return `${monthValue}-${String(safeDay).padStart(2, "0")}`;
+}
+
+function buildMonthlyAgendaPayments(
+  payments: PaymentItem[],
+  monthValue: string,
+): AgendaPaymentItem[] {
+  const actualMonthPayments = payments.filter((payment) =>
+    isPaymentAccountedInMonth(payment, monthValue),
+  );
+
+  const actualRecurrentKeys = new Set(
+    actualMonthPayments
+      .filter((payment) => payment.payment_kind === "recurrent")
+      .map(getRecurrentSeriesKey),
+  );
+
+  const recurrentTemplateByKey = new Map<string, PaymentItem>();
+  const recurrentFirstMonthByKey = new Map<string, string>();
+
+  for (const payment of payments) {
+    if (payment.payment_kind !== "recurrent") {
+      continue;
+    }
+
+    const key = getRecurrentSeriesKey(payment);
+    const paymentMonth =
+      payment.due_date?.slice(0, 7) ?? payment.created_at.slice(0, 7);
+
+    const currentFirstMonth = recurrentFirstMonthByKey.get(key);
+
+    if (!currentFirstMonth || paymentMonth < currentFirstMonth) {
+      recurrentFirstMonthByKey.set(key, paymentMonth);
+    }
+
+    const currentTemplate = recurrentTemplateByKey.get(key);
+
+    if (!currentTemplate) {
+      recurrentTemplateByKey.set(key, payment);
+      continue;
+    }
+
+    const paymentDueDate = payment.due_date ?? "";
+    const templateDueDate = currentTemplate.due_date ?? "";
+
+    if (
+      payment.updated_at > currentTemplate.updated_at ||
+      paymentDueDate > templateDueDate
+    ) {
+      recurrentTemplateByKey.set(key, payment);
+    }
+  }
+
+  const projectedPayments: AgendaPaymentItem[] = [];
+
+  for (const [key, template] of recurrentTemplateByKey.entries()) {
+    const firstMonth = recurrentFirstMonthByKey.get(key);
+
+    if (actualRecurrentKeys.has(key)) {
+      continue;
+    }
+
+    if (firstMonth && monthValue < firstMonth) {
+      continue;
+    }
+
+    projectedPayments.push({
+      ...template,
+      id: `projected-${key}-${monthValue}`,
+      status: "pending",
+      due_date: getProjectedDueDate(template, monthValue),
+      paid_at: null,
+      postponed_to: null,
+      created_at: `${monthValue}-01T00:00:00.000Z`,
+      updated_at: template.updated_at,
+      is_projected: true,
+      source_payment_id: template.id,
+      projected_month: monthValue,
+    });
+  }
+
+  return sortAgendaPayments([...actualMonthPayments, ...projectedPayments]);
 }
 export default function PaymentsPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -204,7 +335,8 @@ export default function PaymentsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
   const [deleteTargetPayment, setDeleteTargetPayment] =
-    useState<PaymentItem | null>(null);
+    useState<PaymentItem | null>(null);  const [selectedMonth, setSelectedMonth] = useState(getMonthInputValue());
+
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -263,8 +395,13 @@ export default function PaymentsPage() {
     setIsLoading(false);
   }
 
+  const monthlyAgendaPayments = useMemo(
+    () => buildMonthlyAgendaPayments(payments, selectedMonth),
+    [payments, selectedMonth],
+  );
+
   const summary = useMemo(() => {
-    const monthPayments = payments.filter(isPaymentAccountedThisMonth);
+    const monthPayments = monthlyAgendaPayments;
 
     const pending = monthPayments
       .filter((payment) => getEffectiveStatus(payment) === "pending")
@@ -298,10 +435,57 @@ export default function PaymentsPage() {
       activeTotal: pending + postponed + overdue,
       projectedAvailable,
     };
-  }, [payments]);
+  }, [monthlyAgendaPayments]);
 
-  const sortedPayments = useMemo(() => sortAgendaPayments(payments), [payments]);
+  const visiblePayments = monthlyAgendaPayments;
 
+  const selectedMonthParts = useMemo(() => {
+    const [selectedYear, selectedMonthNumber] = selectedMonth.split("-");
+
+    return {
+      selectedYear,
+      selectedMonthNumber,
+    };
+  }, [selectedMonth]);
+
+  const availableYears = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+
+    return Array.from({ length: 7 }, (_, index) =>
+      String(currentYear - 3 + index),
+    );
+  }, []);
+
+  function shiftSelectedMonth(months: number) {
+    const [year, month] = selectedMonth.split("-").map(Number);
+
+    if (!year || !month) {
+      setSelectedMonth(getMonthInputValue());
+      return;
+    }
+
+    const nextDate = new Date(year, month - 1 + months, 1);
+    const nextYear = nextDate.getFullYear();
+    const nextMonth = String(nextDate.getMonth() + 1).padStart(2, "0");
+
+    setSelectedMonth(`${nextYear}-${nextMonth}`);
+  }
+
+  function resetSelectedMonth() {
+    setSelectedMonth(getMonthInputValue());
+  }
+
+  function updateSelectedMonthPart(part: "year" | "month", value: string) {
+    const [currentYear, currentMonth] = getMonthInputValue().split("-");
+    const [selectedYear, selectedMonthNumber] = selectedMonth.split("-");
+
+    const nextYear =
+      part === "year" ? value : selectedYear || currentYear;
+    const nextMonth =
+      part === "month" ? value.padStart(2, "0") : selectedMonthNumber || currentMonth;
+
+    setSelectedMonth(`${nextYear}-${nextMonth}`);
+  }
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -471,7 +655,38 @@ export default function PaymentsPage() {
     setMessage(successMessage);
     return data as PaymentItem;
   }
-  async function markAsPaid(payment: PaymentItem) {
+  async function markAsPaid(payment: AgendaPaymentItem) {
+    if (payment.is_projected && userId) {
+      const { data, error } = await supabase
+        .from("payment_items")
+        .insert({
+          space_id: payment.space_id,
+          user_id: userId,
+          name: payment.name,
+          amount: payment.amount,
+          category: payment.category,
+          payment_kind: "recurrent",
+          status: "paid",
+          due_date: payment.due_date,
+          paid_at: new Date().toISOString(),
+          installment_number: null,
+          installment_total: null,
+          total_amount: null,
+          remaining_amount: null,
+          notes: payment.notes,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+
+      setPayments((current) => [data as PaymentItem, ...current]);
+      setMessage("Pago recurrente del mes marcado como pagado.");
+      return;
+    }
     const newRemaining =
       payment.payment_kind === "temporary" && payment.remaining_amount
         ? Math.max(Number(payment.remaining_amount) - Number(payment.amount), 0)
@@ -704,11 +919,86 @@ export default function PaymentsPage() {
           </div>
         )}
 
+        <section className="rounded-3xl border border-white/10 bg-slate-900 p-5">
+          <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                Periodo de análisis
+              </p>
+
+              <h2 className="mt-2 text-2xl font-black capitalize">
+                {getMonthLabel(selectedMonth)}
+              </h2>
+
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                Se muestran los pagos reales del mes elegido y los pagos recurrentes esperados. Los estados pagados no se arrastran de otros meses.
+              </p>
+            </div>
+
+            <div className="rounded-[2rem] border border-white/10 bg-slate-950/70 p-3">
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => shiftSelectedMonth(-1)}
+                  className="rounded-full border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  ←
+                </button>
+
+                <button
+                  type="button"
+                  onClick={resetSelectedMonth}
+                  className="rounded-full bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
+                >
+                  Este mes
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => shiftSelectedMonth(1)}
+                  className="rounded-full border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  →
+                </button>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <select
+                  value={selectedMonthParts.selectedMonthNumber}
+                  onChange={(event) =>
+                    updateSelectedMonthPart("month", event.target.value)
+                  }
+                  className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-emerald-400"
+                >
+                  {monthOptions.map((month) => (
+                    <option key={month.value} value={month.value}>
+                      {month.label}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={selectedMonthParts.selectedYear}
+                  onChange={(event) =>
+                    updateSelectedMonthPart("year", event.target.value)
+                  }
+                  className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-emerald-400"
+                >
+                  {availableYears.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </section>
         <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
           <SummaryCard
             title="Pendiente"
             value={moneyFormatter.format(summary.pending + summary.postponed)}
-            detail="Pagos por realizar este mes"
+            detail={`Pagos por realizar en ${getMonthLabel(selectedMonth)}`}
             tone="warning"
           />
 
@@ -722,7 +1012,7 @@ export default function PaymentsPage() {
           <SummaryCard
             title="Pagado"
             value={moneyFormatter.format(summary.paid)}
-            detail="Pagos confirmados este mes"
+            detail={`Pagos confirmados en ${getMonthLabel(selectedMonth)}`}
             tone="success"
           />
 
@@ -746,11 +1036,11 @@ export default function PaymentsPage() {
           </p>
 
           <h2 className="mt-3 text-2xl font-bold">
-            Tienes {moneyFormatter.format(summary.activeTotal)} por cubrir este mes.
+            Tienes {moneyFormatter.format(summary.activeTotal)} por cubrir en {getMonthLabel(selectedMonth)}.
           </h2>
 
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-            Los pagos pendientes, pospuestos y vencidos del mes actual siguen descontando
+            Los pagos pendientes, pospuestos y vencidos del mes elegido siguen descontando
             de tu disponible proyectado hasta que los marques como pagados, los
             edites, los omitas este mes o los elimines.
           </p>
@@ -994,10 +1284,10 @@ export default function PaymentsPage() {
             <div className="mt-6 space-y-4">
               {isLoading ? (
                 <EmptyText text="Cargando agenda de pagos..." />
-              ) : sortedPayments.length === 0 ? (
-                <EmptyText text="Aún no tienes pagos en la agenda." />
+              ) : visiblePayments.length === 0 ? (
+                <EmptyText text="No tienes pagos asociados a este mes." />
               ) : (
-                sortedPayments.map((payment) => (
+                visiblePayments.map((payment) => (
                   <PaymentCard
                     key={payment.id}
                     payment={payment}
@@ -1060,7 +1350,7 @@ function PaymentCard({
   onEdit,
   onDelete,
 }: {
-  payment: PaymentItem;
+  payment: AgendaPaymentItem;
   isUpdating: boolean;
   onPaid: () => void;
   onPostpone: () => void;
@@ -1072,6 +1362,7 @@ function PaymentCard({
 
   const isPaid = effectiveStatus === "paid";
   const isOmitted = effectiveStatus === "omitted";
+  const isProjected = Boolean(payment.is_projected);
   const canAct = !isPaid && !isOmitted;
 
   return (
@@ -1085,6 +1376,12 @@ function PaymentCard({
             {isNextMonthPayment(payment) && (
               <span className="rounded-full bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-300">
                 Próximo mes
+              </span>
+            )}
+
+            {isProjected && (
+              <span className="rounded-full bg-violet-400/10 px-3 py-1 text-xs font-semibold text-violet-300">
+                Programado
               </span>
             )}
           </div>
@@ -1115,6 +1412,12 @@ function PaymentCard({
           {payment.notes && (
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
               {payment.notes}
+            </p>
+          )}
+
+          {isProjected && (
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-violet-300">
+              Pago recurrente esperado para este mes. Aún no existe como pago real.
             </p>
           )}
         </div>
@@ -1148,43 +1451,51 @@ function PaymentCard({
               {isUpdating ? "Procesando..." : "Marcar pagado"}
             </button>
 
-            <button
-              type="button"
-              onClick={onPostpone}
+            {!isProjected && (
+              <button
+                type="button"
+                onClick={onPostpone}
               disabled={isUpdating}
               className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Posponer 7 días
-            </button>
+              >
+                Posponer 7 días
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={onOmit}
+            {!isProjected && (
+              <button
+                type="button"
+                onClick={onOmit}
               disabled={isUpdating}
               className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Omitir este mes
-            </button>
+              >
+                Omitir este mes
+              </button>
+            )}
           </>
         )}
 
-        <button
-          type="button"
-          onClick={onEdit}
+        {!isProjected && (
+          <button
+            type="button"
+            onClick={onEdit}
           disabled={isUpdating}
           className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          Editar
-        </button>
+          >
+            Editar
+          </button>
+        )}
 
-        <button
-          type="button"
-          onClick={onDelete}
+        {!isProjected && (
+          <button
+            type="button"
+            onClick={onDelete}
           disabled={isUpdating}
           className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          Eliminar
-        </button>
+          >
+            Eliminar
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1254,6 +1565,13 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
+
+
+
+
+
+
+
 
 
 
