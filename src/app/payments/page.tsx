@@ -701,6 +701,10 @@ function PaymentCard({
 }) {
   const effectiveStatus = getEffectiveStatus(payment);
 
+  const isPaid = effectiveStatus === "paid";
+  const isOmitted = effectiveStatus === "omitted";
+  const canAct = !isPaid && !isOmitted;
+
   return (
     <div className="rounded-3xl border border-white/10 bg-slate-950 p-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -746,32 +750,48 @@ function PaymentCard({
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onPaid}
-          disabled={isUpdating || effectiveStatus === "paid"}
-          className="rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isUpdating ? "Procesando..." : "Marcar pagado"}
-        </button>
+        {isPaid && (
+          <div className="rounded-full bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-300">
+            Pago confirmado
+          </div>
+        )}
 
-        <button
-          type="button"
-          onClick={onPostpone}
-          disabled={isUpdating || effectiveStatus === "paid"}
-          className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          Posponer 7 días
-        </button>
+        {isOmitted && (
+          <div className="rounded-full bg-slate-400/10 px-4 py-2 text-xs font-semibold text-slate-300">
+            Omitido este mes
+          </div>
+        )}
 
-        <button
-          type="button"
-          onClick={onOmit}
-          disabled={isUpdating || effectiveStatus === "paid"}
-          className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          Omitir este mes
-        </button>
+        {canAct && (
+          <>
+            <button
+              type="button"
+              onClick={onPaid}
+              disabled={isUpdating}
+              className="rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isUpdating ? "Procesando..." : "Marcar pagado"}
+            </button>
+
+            <button
+              type="button"
+              onClick={onPostpone}
+              disabled={isUpdating}
+              className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Posponer 7 días
+            </button>
+
+            <button
+              type="button"
+              onClick={onOmit}
+              disabled={isUpdating}
+              className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Omitir este mes
+            </button>
+          </>
+        )}
 
         <button
           type="button"
@@ -850,3 +870,4 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
+
