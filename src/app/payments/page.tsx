@@ -151,6 +151,13 @@ export default function PaymentsPage() {
   const [installmentTotal, setInstallmentTotal] = useState("");
   const [notes, setNotes] = useState("");
 
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editAmount, setEditAmount] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
@@ -333,6 +340,57 @@ export default function PaymentsPage() {
     setMessage("Pago agregado a la agenda correctamente.");
   }
 
+  function startEditingPayment(payment: PaymentItem) {
+    setEditingPaymentId(payment.id);
+    setEditName(payment.name);
+    setEditAmount(String(Number(payment.amount)));
+    setEditCategory(payment.category);
+    setEditDueDate(payment.due_date ?? "");
+    setEditNotes(payment.notes ?? "");
+    setMessage("");
+  }
+
+  function cancelEditingPayment() {
+    setEditingPaymentId(null);
+    setEditName("");
+    setEditAmount("");
+    setEditCategory("");
+    setEditDueDate("");
+    setEditNotes("");
+  }
+
+  async function saveEditedPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!editingPaymentId) {
+      return;
+    }
+
+    const numericAmount = Number(editAmount);
+
+    if (!editName.trim() || !editCategory.trim() || numericAmount <= 0) {
+      setMessage("Completa nombre, categoría y valor correctamente.");
+      return;
+    }
+
+    const updatedPayment = await updatePayment(
+      editingPaymentId,
+      {
+        name: editName.trim(),
+        amount: numericAmount,
+        category: editCategory.trim(),
+        due_date: editDueDate || null,
+        notes: editNotes.trim() || null,
+      },
+      "Pago actualizado correctamente.",
+    );
+
+    if (!updatedPayment) {
+      return;
+    }
+
+    cancelEditingPayment();
+  }
   async function updatePayment(
     id: string,
     values: Partial<PaymentItem>,
@@ -367,7 +425,6 @@ export default function PaymentsPage() {
     setMessage(successMessage);
     return data as PaymentItem;
   }
-
   async function markAsPaid(payment: PaymentItem) {
     const newRemaining =
       payment.payment_kind === "temporary" && payment.remaining_amount
@@ -385,6 +442,37 @@ export default function PaymentsPage() {
     );
 
     if (!updatedPayment) return;
+
+    if (payment.payment_kind === "recurrent" && userId) {
+      const { data: nextPayment, error } = await supabase
+        .from("payment_items")
+        .insert({
+          space_id: payment.space_id,
+          user_id: userId,
+          name: payment.name,
+          amount: payment.amount,
+          category: payment.category,
+          payment_kind: "recurrent",
+          status: "pending",
+          due_date: addOneMonth(payment.due_date),
+          installment_number: null,
+          installment_total: null,
+          total_amount: null,
+          remaining_amount: null,
+          notes: payment.notes,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+
+      setPayments((current) => [nextPayment as PaymentItem, ...current]);
+      setMessage("Pago marcado como pagado y siguiente mes creado.");
+      return;
+    }
 
     const shouldCreateNextInstallment =
       payment.payment_kind === "temporary" &&
@@ -428,7 +516,6 @@ export default function PaymentsPage() {
     setPayments((current) => [nextPayment as PaymentItem, ...current]);
     setMessage("Pago marcado como pagado y siguiente cuota creada.");
   }
-
   async function postponePayment(payment: PaymentItem) {
     const nextDate = addDays(payment.due_date, 7);
 
@@ -681,6 +768,88 @@ export default function PaymentsPage() {
               </span>
             </div>
 
+            {editingPaymentId && (
+              <form
+                onSubmit={saveEditedPayment}
+                className="mt-6 rounded-3xl border border-emerald-400/30 bg-emerald-400/10 p-5"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                      Editando pago
+                    </p>
+
+                    <h3 className="mt-2 text-xl font-bold">
+                      Actualiza la información de este pago
+                    </h3>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={cancelEditingPayment}
+                    className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <Field label="Nombre">
+                    <input
+                      value={editName}
+                      onChange={(event) => setEditName(event.target.value)}
+                      className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
+                    />
+                  </Field>
+
+                  <Field label="Valor">
+                    <input
+                      value={editAmount}
+                      onChange={(event) => setEditAmount(event.target.value)}
+                      type="number"
+                      min="0"
+                      className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
+                    />
+                  </Field>
+
+                  <Field label="Categoría">
+                    <input
+                      value={editCategory}
+                      onChange={(event) => setEditCategory(event.target.value)}
+                      className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
+                    />
+                  </Field>
+
+                  <Field label="Fecha de vencimiento">
+                    <input
+                      value={editDueDate}
+                      onChange={(event) => setEditDueDate(event.target.value)}
+                      type="date"
+                      className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
+                    />
+                  </Field>
+                </div>
+
+                <div className="mt-4">
+                  <Field label="Notas">
+                    <textarea
+                      value={editNotes}
+                      onChange={(event) => setEditNotes(event.target.value)}
+                      rows={3}
+                      className="w-full resize-none rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
+                    />
+                  </Field>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={Boolean(isUpdating)}
+                  className="mt-5 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isUpdating ? "Guardando..." : "Guardar cambios"}
+                </button>
+              </form>
+            )}
             <div className="mt-6 space-y-4">
               {isLoading ? (
                 <EmptyText text="Cargando agenda de pagos..." />
@@ -695,6 +864,7 @@ export default function PaymentsPage() {
                     onPaid={() => markAsPaid(payment)}
                     onPostpone={() => postponePayment(payment)}
                     onOmit={() => omitPayment(payment)}
+                    onEdit={() => startEditingPayment(payment)}
                     onDelete={() => deletePayment(payment.id)}
                   />
                 ))
@@ -746,6 +916,7 @@ function PaymentCard({
   onPaid,
   onPostpone,
   onOmit,
+  onEdit,
   onDelete,
 }: {
   payment: PaymentItem;
@@ -753,9 +924,14 @@ function PaymentCard({
   onPaid: () => void;
   onPostpone: () => void;
   onOmit: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const effectiveStatus = getEffectiveStatus(payment);
+
+  const isPaid = effectiveStatus === "paid";
+  const isOmitted = effectiveStatus === "omitted";
+  const canAct = !isPaid && !isOmitted;
 
   return (
     <div className="rounded-3xl border border-white/10 bg-slate-950 p-5">
@@ -766,11 +942,10 @@ function PaymentCard({
             <StatusBadge status={effectiveStatus} />
 
             {isNextMonthPayment(payment) && (
-    <span className="rounded-full bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-300">
-      Próximo mes
-    </span>
-  )}
-  
+              <span className="rounded-full bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-300">
+                Próximo mes
+              </span>
+            )}
           </div>
 
           <p className="mt-2 text-sm text-slate-400">
@@ -808,38 +983,20 @@ function PaymentCard({
         </p>
       </div>
 
-         <div className="mt-5 flex flex-wrap gap-2">
-        {effectiveStatus === "paid" ? (
-          <>
-            <div className="rounded-full bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-300">
-              Pago confirmado
-            </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        {isPaid && (
+          <div className="rounded-full bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-300">
+            Pago confirmado
+          </div>
+        )}
 
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={isUpdating}
-              className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Eliminar
-            </button>
-          </>
-        ) : effectiveStatus === "omitted" ? (
-          <>
-            <div className="rounded-full bg-slate-400/10 px-4 py-2 text-xs font-semibold text-slate-300">
-              Omitido este mes
-            </div>
+        {isOmitted && (
+          <div className="rounded-full bg-slate-400/10 px-4 py-2 text-xs font-semibold text-slate-300">
+            Omitido este mes
+          </div>
+        )}
 
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={isUpdating}
-              className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Eliminar
-            </button>
-          </>
-        ) : (
+        {canAct && (
           <>
             <button
               type="button"
@@ -867,17 +1024,26 @@ function PaymentCard({
             >
               Omitir este mes
             </button>
-
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={isUpdating}
-              className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Eliminar
-            </button>
           </>
         )}
+
+        <button
+          type="button"
+          onClick={onEdit}
+          disabled={isUpdating}
+          className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Editar
+        </button>
+
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={isUpdating}
+          className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Eliminar
+        </button>
       </div>
     </div>
   );
@@ -947,3 +1113,5 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
+
+
