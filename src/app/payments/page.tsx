@@ -39,32 +39,11 @@ type PaymentItem = {
   updated_at: string;
 };
 
-type AgendaPaymentItem = PaymentItem & {
-  is_projected?: boolean;
-  source_payment_id?: string;
-  projected_month?: string;
-};
-
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
   currency: "COP",
   maximumFractionDigits: 0,
 });
-
-const monthOptions = [
-  { value: "01", label: "Enero" },
-  { value: "02", label: "Febrero" },
-  { value: "03", label: "Marzo" },
-  { value: "04", label: "Abril" },
-  { value: "05", label: "Mayo" },
-  { value: "06", label: "Junio" },
-  { value: "07", label: "Julio" },
-  { value: "08", label: "Agosto" },
-  { value: "09", label: "Septiembre" },
-  { value: "10", label: "Octubre" },
-  { value: "11", label: "Noviembre" },
-  { value: "12", label: "Diciembre" },
-];
 
 function todayValue() {
   return new Date().toISOString().slice(0, 10);
@@ -154,158 +133,6 @@ function sortAgendaPayments(items: PaymentItem[]) {
   });
 }
 
-function getMonthInputValue() {
-  return todayValue().slice(0, 7);
-}
-
-function getMonthBounds(monthValue: string) {
-  const [year, month] = monthValue.split("-").map(Number);
-  const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 0);
-
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  };
-}
-
-function getMonthLabel(monthValue: string) {
-  const [year, month] = monthValue.split("-").map(Number);
-
-  if (!year || !month) {
-    return "este mes";
-  }
-
-  return new Intl.DateTimeFormat("es-CO", {
-    month: "long",
-    year: "numeric",
-  }).format(new Date(year, month - 1, 1));
-}
-
-function isSelectedMonthValue(dateValue: string | null, monthValue: string) {
-  if (!dateValue) {
-    return false;
-  }
-
-  return dateValue.slice(0, 7) === monthValue;
-}
-
-function isPaymentAccountedInMonth(
-  payment: PaymentItem,
-  monthValue: string,
-) {
-  const effectiveStatus = getEffectiveStatus(payment);
-
-  if (effectiveStatus === "paid") {
-    return isSelectedMonthValue(payment.paid_at, monthValue);
-  }
-
-  if (effectiveStatus === "omitted") {
-    return isSelectedMonthValue(payment.updated_at, monthValue);
-  }
-
-  return isSelectedMonthValue(payment.due_date, monthValue);
-}
-function getRecurrentSeriesKey(payment: PaymentItem) {
-  return [
-    payment.space_id,
-    payment.name.trim().toLowerCase(),
-    payment.category.trim().toLowerCase(),
-  ].join("|");
-}
-
-function getProjectedDueDate(payment: PaymentItem, monthValue: string) {
-  const [year, month] = monthValue.split("-").map(Number);
-  const originalDay = payment.due_date
-    ? Number(payment.due_date.slice(8, 10))
-    : 1;
-
-  const lastDayOfSelectedMonth = new Date(year, month, 0).getDate();
-  const safeDay = Math.min(originalDay || 1, lastDayOfSelectedMonth);
-
-  return `${monthValue}-${String(safeDay).padStart(2, "0")}`;
-}
-
-function buildMonthlyAgendaPayments(
-  payments: PaymentItem[],
-  monthValue: string,
-): AgendaPaymentItem[] {
-  const actualMonthPayments = payments.filter((payment) =>
-    isPaymentAccountedInMonth(payment, monthValue),
-  );
-
-  const actualRecurrentKeys = new Set(
-    actualMonthPayments
-      .filter((payment) => payment.payment_kind === "recurrent")
-      .map(getRecurrentSeriesKey),
-  );
-
-  const recurrentTemplateByKey = new Map<string, PaymentItem>();
-  const recurrentFirstMonthByKey = new Map<string, string>();
-
-  for (const payment of payments) {
-    if (payment.payment_kind !== "recurrent") {
-      continue;
-    }
-
-    const key = getRecurrentSeriesKey(payment);
-    const paymentMonth =
-      payment.due_date?.slice(0, 7) ?? payment.created_at.slice(0, 7);
-
-    const currentFirstMonth = recurrentFirstMonthByKey.get(key);
-
-    if (!currentFirstMonth || paymentMonth < currentFirstMonth) {
-      recurrentFirstMonthByKey.set(key, paymentMonth);
-    }
-
-    const currentTemplate = recurrentTemplateByKey.get(key);
-
-    if (!currentTemplate) {
-      recurrentTemplateByKey.set(key, payment);
-      continue;
-    }
-
-    const paymentDueDate = payment.due_date ?? "";
-    const templateDueDate = currentTemplate.due_date ?? "";
-
-    if (
-      payment.updated_at > currentTemplate.updated_at ||
-      paymentDueDate > templateDueDate
-    ) {
-      recurrentTemplateByKey.set(key, payment);
-    }
-  }
-
-  const projectedPayments: AgendaPaymentItem[] = [];
-
-  for (const [key, template] of recurrentTemplateByKey.entries()) {
-    const firstMonth = recurrentFirstMonthByKey.get(key);
-
-    if (actualRecurrentKeys.has(key)) {
-      continue;
-    }
-
-    if (firstMonth && monthValue < firstMonth) {
-      continue;
-    }
-
-    projectedPayments.push({
-      ...template,
-      id: `projected-${key}-${monthValue}`,
-      status: "pending",
-      due_date: getProjectedDueDate(template, monthValue),
-      paid_at: null,
-      postponed_to: null,
-      created_at: `${monthValue}-01T00:00:00.000Z`,
-      updated_at: template.updated_at,
-      is_projected: true,
-      source_payment_id: template.id,
-      projected_month: monthValue,
-    });
-  }
-
-  return sortAgendaPayments([...actualMonthPayments, ...projectedPayments]);
-}
 export default function PaymentsPage() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -334,9 +161,6 @@ export default function PaymentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
-  const [deleteTargetPayment, setDeleteTargetPayment] =
-    useState<PaymentItem | null>(null);  const [selectedMonth, setSelectedMonth] = useState(getMonthInputValue());
-
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -395,31 +219,24 @@ export default function PaymentsPage() {
     setIsLoading(false);
   }
 
-  const monthlyAgendaPayments = useMemo(
-    () => buildMonthlyAgendaPayments(payments, selectedMonth),
-    [payments, selectedMonth],
-  );
-
   const summary = useMemo(() => {
-    const monthPayments = monthlyAgendaPayments;
-
-    const pending = monthPayments
+    const pending = payments
       .filter((payment) => getEffectiveStatus(payment) === "pending")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const postponed = monthPayments
+    const postponed = payments
       .filter((payment) => getEffectiveStatus(payment) === "postponed")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const overdue = monthPayments
+    const overdue = payments
       .filter((payment) => getEffectiveStatus(payment) === "overdue")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const paid = monthPayments
+    const paid = payments
       .filter((payment) => getEffectiveStatus(payment) === "paid")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const omitted = monthPayments
+    const omitted = payments
       .filter((payment) => getEffectiveStatus(payment) === "omitted")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
@@ -435,57 +252,10 @@ export default function PaymentsPage() {
       activeTotal: pending + postponed + overdue,
       projectedAvailable,
     };
-  }, [monthlyAgendaPayments]);
+  }, [payments]);
 
-  const visiblePayments = monthlyAgendaPayments;
+  const sortedPayments = useMemo(() => sortAgendaPayments(payments), [payments]);
 
-  const selectedMonthParts = useMemo(() => {
-    const [selectedYear, selectedMonthNumber] = selectedMonth.split("-");
-
-    return {
-      selectedYear,
-      selectedMonthNumber,
-    };
-  }, [selectedMonth]);
-
-  const availableYears = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-
-    return Array.from({ length: 7 }, (_, index) =>
-      String(currentYear - 3 + index),
-    );
-  }, []);
-
-  function shiftSelectedMonth(months: number) {
-    const [year, month] = selectedMonth.split("-").map(Number);
-
-    if (!year || !month) {
-      setSelectedMonth(getMonthInputValue());
-      return;
-    }
-
-    const nextDate = new Date(year, month - 1 + months, 1);
-    const nextYear = nextDate.getFullYear();
-    const nextMonth = String(nextDate.getMonth() + 1).padStart(2, "0");
-
-    setSelectedMonth(`${nextYear}-${nextMonth}`);
-  }
-
-  function resetSelectedMonth() {
-    setSelectedMonth(getMonthInputValue());
-  }
-
-  function updateSelectedMonthPart(part: "year" | "month", value: string) {
-    const [currentYear, currentMonth] = getMonthInputValue().split("-");
-    const [selectedYear, selectedMonthNumber] = selectedMonth.split("-");
-
-    const nextYear =
-      part === "year" ? value : selectedYear || currentYear;
-    const nextMonth =
-      part === "month" ? value.padStart(2, "0") : selectedMonthNumber || currentMonth;
-
-    setSelectedMonth(`${nextYear}-${nextMonth}`);
-  }
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -570,57 +340,6 @@ export default function PaymentsPage() {
     setMessage("Pago agregado a la agenda correctamente.");
   }
 
-  function startEditingPayment(payment: PaymentItem) {
-    setEditingPaymentId(payment.id);
-    setEditName(payment.name);
-    setEditAmount(String(Number(payment.amount)));
-    setEditCategory(payment.category);
-    setEditDueDate(payment.due_date ?? "");
-    setEditNotes(payment.notes ?? "");
-    setMessage("");
-  }
-
-  function cancelEditingPayment() {
-    setEditingPaymentId(null);
-    setEditName("");
-    setEditAmount("");
-    setEditCategory("");
-    setEditDueDate("");
-    setEditNotes("");
-  }
-
-  async function saveEditedPayment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!editingPaymentId) {
-      return;
-    }
-
-    const numericAmount = Number(editAmount);
-
-    if (!editName.trim() || !editCategory.trim() || numericAmount <= 0) {
-      setMessage("Completa nombre, categoría y valor correctamente.");
-      return;
-    }
-
-    const updatedPayment = await updatePayment(
-      editingPaymentId,
-      {
-        name: editName.trim(),
-        amount: numericAmount,
-        category: editCategory.trim(),
-        due_date: editDueDate || null,
-        notes: editNotes.trim() || null,
-      },
-      "Pago actualizado correctamente.",
-    );
-
-    if (!updatedPayment) {
-      return;
-    }
-
-    cancelEditingPayment();
-  }
   async function updatePayment(
     id: string,
     values: Partial<PaymentItem>,
@@ -655,38 +374,8 @@ export default function PaymentsPage() {
     setMessage(successMessage);
     return data as PaymentItem;
   }
-  async function markAsPaid(payment: AgendaPaymentItem) {
-    if (payment.is_projected && userId) {
-      const { data, error } = await supabase
-        .from("payment_items")
-        .insert({
-          space_id: payment.space_id,
-          user_id: userId,
-          name: payment.name,
-          amount: payment.amount,
-          category: payment.category,
-          payment_kind: "recurrent",
-          status: "paid",
-          due_date: payment.due_date,
-          paid_at: new Date().toISOString(),
-          installment_number: null,
-          installment_total: null,
-          total_amount: null,
-          remaining_amount: null,
-          notes: payment.notes,
-        })
-        .select()
-        .single();
 
-      if (error) {
-        setMessage(error.message);
-        return;
-      }
-
-      setPayments((current) => [data as PaymentItem, ...current]);
-      setMessage("Pago recurrente del mes marcado como pagado.");
-      return;
-    }
+  async function markAsPaid(payment: PaymentItem) {
     const newRemaining =
       payment.payment_kind === "temporary" && payment.remaining_amount
         ? Math.max(Number(payment.remaining_amount) - Number(payment.amount), 0)
@@ -703,37 +392,6 @@ export default function PaymentsPage() {
     );
 
     if (!updatedPayment) return;
-
-    if (payment.payment_kind === "recurrent" && userId) {
-      const { data: nextPayment, error } = await supabase
-        .from("payment_items")
-        .insert({
-          space_id: payment.space_id,
-          user_id: userId,
-          name: payment.name,
-          amount: payment.amount,
-          category: payment.category,
-          payment_kind: "recurrent",
-          status: "pending",
-          due_date: addOneMonth(payment.due_date),
-          installment_number: null,
-          installment_total: null,
-          total_amount: null,
-          remaining_amount: null,
-          notes: payment.notes,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        setMessage(error.message);
-        return;
-      }
-
-      setPayments((current) => [nextPayment as PaymentItem, ...current]);
-      setMessage("Pago marcado como pagado y siguiente mes creado.");
-      return;
-    }
 
     const shouldCreateNextInstallment =
       payment.payment_kind === "temporary" &&
@@ -777,6 +435,9 @@ export default function PaymentsPage() {
     setPayments((current) => [nextPayment as PaymentItem, ...current]);
     setMessage("Pago marcado como pagado y siguiente cuota creada.");
   }
+
+  
+
   async function postponePayment(payment: PaymentItem) {
     const nextDate = addDays(payment.due_date, 7);
 
@@ -800,34 +461,12 @@ export default function PaymentsPage() {
       "Pago omitido este mes.",
     );
   }
-  function requestDeletePayment(payment: PaymentItem) {
-    setDeleteTargetPayment(payment);
-    setMessage("");
-  }
 
-  function cancelDeletePayment() {
-    if (isUpdating) {
-      return;
-    }
-
-    setDeleteTargetPayment(null);
-  }
-
-  async function confirmDeletePayment() {
-    if (!deleteTargetPayment) {
-      return;
-    }
-
-    const paymentId = deleteTargetPayment.id;
-    const paymentName = deleteTargetPayment.name;
-
-    setIsUpdating(paymentId);
+  async function deletePayment(id: string) {
+    setIsUpdating(id);
     setMessage("");
 
-    const { error } = await supabase
-      .from("payment_items")
-      .delete()
-      .eq("id", paymentId);
+    const { error } = await supabase.from("payment_items").delete().eq("id", id);
 
     setIsUpdating(null);
 
@@ -836,169 +475,21 @@ export default function PaymentsPage() {
       return;
     }
 
-    setPayments((current) =>
-      current.filter((payment) => payment.id !== paymentId),
-    );
-
-    if (editingPaymentId === paymentId) {
-      cancelEditingPayment();
-    }
-
-    setDeleteTargetPayment(null);
-    setMessage(`"${paymentName}" eliminado correctamente.`);
+    setPayments((current) => current.filter((payment) => payment.id !== id));
+    setMessage("Pago eliminado correctamente.");
   }
+
   return (
     <SimplePage
       title="Agenda de pagos"
       description="Controla tus pagos fijos, deudas temporales, cuotas, vencidos y pagados sin perder de vista cuánto te queda disponible."
     >
       <div className="grid gap-6">
-        {deleteTargetPayment && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-[2rem] border border-red-400/30 bg-slate-950 p-6 shadow-2xl shadow-red-950/40">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-400/10 text-2xl">
-                ⚠️
-              </div>
-
-              <div className="mt-5 text-center">
-                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-red-300">
-                  Eliminar pago de la agenda
-                </p>
-
-                <h2 className="mt-3 text-2xl font-black text-white">
-                  ¿Eliminar "{deleteTargetPayment.name}"?
-                </h2>
-
-                <p className="mt-3 text-sm leading-6 text-slate-400">
-                  Esta acción no se puede deshacer. Si este pago pertenece a una
-                  deuda, cuota o servicio recurrente, se eliminará de tu agenda.
-                </p>
-              </div>
-
-              <div className="mt-6 rounded-3xl border border-white/10 bg-slate-900 p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-semibold text-white">
-                      {deleteTargetPayment.name}
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-500">
-                      {deleteTargetPayment.category} ·{" "}
-                      {getKindLabel(deleteTargetPayment.payment_kind)}
-                    </p>
-                  </div>
-
-                  <p className="text-lg font-black text-white">
-                    {moneyFormatter.format(Number(deleteTargetPayment.amount))}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={cancelDeletePayment}
-                  disabled={Boolean(isUpdating)}
-                  className="rounded-full border border-white/10 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Cancelar
-                </button>
-
-                <button
-                  type="button"
-                  onClick={confirmDeletePayment}
-                  disabled={isUpdating === deleteTargetPayment.id}
-                  className="rounded-full bg-red-400 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isUpdating === deleteTargetPayment.id
-                    ? "Eliminando..."
-                    : "Sí, eliminar"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <section className="rounded-3xl border border-white/10 bg-slate-900 p-5">
-          <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
-                Periodo de análisis
-              </p>
-
-              <h2 className="mt-2 text-2xl font-black capitalize">
-                {getMonthLabel(selectedMonth)}
-              </h2>
-
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                Se muestran los pagos reales del mes elegido y los pagos recurrentes esperados. Los estados pagados no se arrastran de otros meses.
-              </p>
-            </div>
-
-            <div className="rounded-[2rem] border border-white/10 bg-slate-950/70 p-3">
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => shiftSelectedMonth(-1)}
-                  className="rounded-full border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
-                >
-                  ←
-                </button>
-
-                <button
-                  type="button"
-                  onClick={resetSelectedMonth}
-                  className="rounded-full bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
-                >
-                  Este mes
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => shiftSelectedMonth(1)}
-                  className="rounded-full border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
-                >
-                  →
-                </button>
-              </div>
-
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <select
-                  value={selectedMonthParts.selectedMonthNumber}
-                  onChange={(event) =>
-                    updateSelectedMonthPart("month", event.target.value)
-                  }
-                  className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-emerald-400"
-                >
-                  {monthOptions.map((month) => (
-                    <option key={month.value} value={month.value}>
-                      {month.label}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={selectedMonthParts.selectedYear}
-                  onChange={(event) =>
-                    updateSelectedMonthPart("year", event.target.value)
-                  }
-                  className="rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-emerald-400"
-                >
-                  {availableYears.map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-        </section>
         <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
           <SummaryCard
             title="Pendiente"
             value={moneyFormatter.format(summary.pending + summary.postponed)}
-            detail={`Pagos por realizar en ${getMonthLabel(selectedMonth)}`}
+            detail="Pagos por realizar este mes"
             tone="warning"
           />
 
@@ -1012,7 +503,7 @@ export default function PaymentsPage() {
           <SummaryCard
             title="Pagado"
             value={moneyFormatter.format(summary.paid)}
-            detail={`Pagos confirmados en ${getMonthLabel(selectedMonth)}`}
+            detail="Pagos confirmados"
             tone="success"
           />
 
@@ -1036,12 +527,12 @@ export default function PaymentsPage() {
           </p>
 
           <h2 className="mt-3 text-2xl font-bold">
-            Tienes {moneyFormatter.format(summary.activeTotal)} por cubrir en {getMonthLabel(selectedMonth)}.
+            Tienes {moneyFormatter.format(summary.activeTotal)} por cubrir.
           </h2>
 
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-            Los pagos pendientes, pospuestos y vencidos del mes elegido siguen descontando
-            de tu disponible proyectado hasta que los marques como pagados, los
+            Los pagos pendientes y vencidos siguen descontando de tu disponible
+            proyectado hasta que los marques como pagados, los pospongas, los
             edites, los omitas este mes o los elimines.
           </p>
         </section>
@@ -1199,95 +690,13 @@ export default function PaymentsPage() {
               </span>
             </div>
 
-            {editingPaymentId && (
-              <form
-                onSubmit={saveEditedPayment}
-                className="mt-6 rounded-3xl border border-emerald-400/30 bg-emerald-400/10 p-5"
-              >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
-                      Editando pago
-                    </p>
-
-                    <h3 className="mt-2 text-xl font-bold">
-                      Actualiza la información de este pago
-                    </h3>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={cancelEditingPayment}
-                    className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  <Field label="Nombre">
-                    <input
-                      value={editName}
-                      onChange={(event) => setEditName(event.target.value)}
-                      className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
-                    />
-                  </Field>
-
-                  <Field label="Valor">
-                    <input
-                      value={editAmount}
-                      onChange={(event) => setEditAmount(event.target.value)}
-                      type="number"
-                      min="0"
-                      className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
-                    />
-                  </Field>
-
-                  <Field label="Categoría">
-                    <input
-                      value={editCategory}
-                      onChange={(event) => setEditCategory(event.target.value)}
-                      className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
-                    />
-                  </Field>
-
-                  <Field label="Fecha de vencimiento">
-                    <input
-                      value={editDueDate}
-                      onChange={(event) => setEditDueDate(event.target.value)}
-                      type="date"
-                      className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
-                    />
-                  </Field>
-                </div>
-
-                <div className="mt-4">
-                  <Field label="Notas">
-                    <textarea
-                      value={editNotes}
-                      onChange={(event) => setEditNotes(event.target.value)}
-                      rows={3}
-                      className="w-full resize-none rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
-                    />
-                  </Field>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={Boolean(isUpdating)}
-                  className="mt-5 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isUpdating ? "Guardando..." : "Guardar cambios"}
-                </button>
-              </form>
-            )}
             <div className="mt-6 space-y-4">
               {isLoading ? (
                 <EmptyText text="Cargando agenda de pagos..." />
-              ) : visiblePayments.length === 0 ? (
-                <EmptyText text="No tienes pagos asociados a este mes." />
+              ) : sortedPayments.length === 0 ? (
+                <EmptyText text="Aún no tienes pagos en la agenda." />
               ) : (
-                visiblePayments.map((payment) => (
+                sortedPayments.map((payment) => (
                   <PaymentCard
                     key={payment.id}
                     payment={payment}
@@ -1295,8 +704,7 @@ export default function PaymentsPage() {
                     onPaid={() => markAsPaid(payment)}
                     onPostpone={() => postponePayment(payment)}
                     onOmit={() => omitPayment(payment)}
-                    onEdit={() => startEditingPayment(payment)}
-                    onDelete={() => requestDeletePayment(payment)}
+                    onDelete={() => deletePayment(payment.id)}
                   />
                 ))
               )}
@@ -1347,23 +755,16 @@ function PaymentCard({
   onPaid,
   onPostpone,
   onOmit,
-  onEdit,
   onDelete,
 }: {
-  payment: AgendaPaymentItem;
+  payment: PaymentItem;
   isUpdating: boolean;
   onPaid: () => void;
   onPostpone: () => void;
   onOmit: () => void;
-  onEdit: () => void;
   onDelete: () => void;
 }) {
   const effectiveStatus = getEffectiveStatus(payment);
-
-  const isPaid = effectiveStatus === "paid";
-  const isOmitted = effectiveStatus === "omitted";
-  const isProjected = Boolean(payment.is_projected);
-  const canAct = !isPaid && !isOmitted;
 
   return (
     <div className="rounded-3xl border border-white/10 bg-slate-950 p-5">
@@ -1374,16 +775,11 @@ function PaymentCard({
             <StatusBadge status={effectiveStatus} />
 
             {isNextMonthPayment(payment) && (
-              <span className="rounded-full bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-300">
-                Próximo mes
-              </span>
-            )}
-
-            {isProjected && (
-              <span className="rounded-full bg-violet-400/10 px-3 py-1 text-xs font-semibold text-violet-300">
-                Programado
-              </span>
-            )}
+    <span className="rounded-full bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-300">
+      Próximo mes
+    </span>
+  )}
+  
           </div>
 
           <p className="mt-2 text-sm text-slate-400">
@@ -1414,12 +810,6 @@ function PaymentCard({
               {payment.notes}
             </p>
           )}
-
-          {isProjected && (
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-violet-300">
-              Pago recurrente esperado para este mes. Aún no existe como pago real.
-            </p>
-          )}
         </div>
 
         <p className="text-2xl font-black">
@@ -1427,20 +817,38 @@ function PaymentCard({
         </p>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        {isPaid && (
-          <div className="rounded-full bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-300">
-            Pago confirmado
-          </div>
-        )}
+         <div className="mt-5 flex flex-wrap gap-2">
+        {effectiveStatus === "paid" ? (
+          <>
+            <div className="rounded-full bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-300">
+              Pago confirmado
+            </div>
 
-        {isOmitted && (
-          <div className="rounded-full bg-slate-400/10 px-4 py-2 text-xs font-semibold text-slate-300">
-            Omitido este mes
-          </div>
-        )}
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={isUpdating}
+              className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Eliminar
+            </button>
+          </>
+        ) : effectiveStatus === "omitted" ? (
+          <>
+            <div className="rounded-full bg-slate-400/10 px-4 py-2 text-xs font-semibold text-slate-300">
+              Omitido este mes
+            </div>
 
-        {canAct && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={isUpdating}
+              className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Eliminar
+            </button>
+          </>
+        ) : (
           <>
             <button
               type="button"
@@ -1451,50 +859,33 @@ function PaymentCard({
               {isUpdating ? "Procesando..." : "Marcar pagado"}
             </button>
 
-            {!isProjected && (
-              <button
-                type="button"
-                onClick={onPostpone}
+            <button
+              type="button"
+              onClick={onPostpone}
               disabled={isUpdating}
               className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Posponer 7 días
-              </button>
-            )}
+            >
+              Posponer 7 días
+            </button>
 
-            {!isProjected && (
-              <button
-                type="button"
-                onClick={onOmit}
+            <button
+              type="button"
+              onClick={onOmit}
               disabled={isUpdating}
               className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Omitir este mes
-              </button>
-            )}
+            >
+              Omitir este mes
+            </button>
+
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={isUpdating}
+              className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Eliminar
+            </button>
           </>
-        )}
-
-        {!isProjected && (
-          <button
-            type="button"
-            onClick={onEdit}
-          disabled={isUpdating}
-          className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Editar
-          </button>
-        )}
-
-        {!isProjected && (
-          <button
-            type="button"
-            onClick={onDelete}
-          disabled={isUpdating}
-          className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Eliminar
-          </button>
         )}
       </div>
     </div>
@@ -1565,15 +956,3 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
