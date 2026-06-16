@@ -520,6 +520,9 @@ export default function SpaceDetailPage() {
   const [isSavingManual, setIsSavingManual] = useState(false);
   const [isSavingGoal, setIsSavingGoal] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
+  const [isRemovingTransaction, setIsRemovingTransaction] = useState<string | null>(
+    null,
+  );
   const [message, setMessage] = useState("");
 
   const isOwner = space?.created_by === userId;
@@ -951,6 +954,26 @@ export default function SpaceDetailPage() {
     setManualAmount("");
     setManualCategory("");
     setMessage("Movimiento agregado al mapa.");
+  }
+
+  async function removeTransaction(id: string) {
+    setIsRemovingTransaction(id);
+    setMessage("");
+
+    const { error } = await supabase.from("transactions").delete().eq("id", id);
+
+    setIsRemovingTransaction(null);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setTransactions((current) =>
+      current.filter((transaction) => transaction.id !== id),
+    );
+
+    setMessage("Movimiento eliminado correctamente.");
   }
 
   async function handleGoalSubmit(event: FormEvent<HTMLFormElement>) {
