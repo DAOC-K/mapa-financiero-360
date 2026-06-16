@@ -113,6 +113,13 @@ function todayValue() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function getMonthlyBudgetBase(spaces: Space[]) {
+  return spaces.reduce(
+    (sum, space) => sum + Number(space.monthly_budget ?? 0),
+    0,
+  );
+}
+
 function getEffectivePaymentStatus(payment: PaymentItem): PaymentStatus {
   if (payment.status === "paid" || payment.status === "omitted") {
     return payment.status;
@@ -486,7 +493,9 @@ export default function DashboardPage() {
       .filter((item) => item.type === "expense" && !item.is_fixed)
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
-    const available = income - expenses;
+    const expectedMonthlyBudget = getMonthlyBudgetBase(spaces);
+    const realCashFlow = income - expenses;
+    const available = expectedMonthlyBudget + income - expenses;
 
     const goalSavings = goals.reduce(
       (sum, goal) => sum + Number(goal.current_amount),
@@ -532,8 +541,9 @@ export default function DashboardPage() {
 
     const projectedAfterAgenda = available - activeAgendaTotal;
 
-    const expenseRatio = income > 0 ? expenses / income : 0;
-    const savingRatio = income > 0 ? savingAmount / income : 0;
+    const baseForRatios = Math.max(expectedMonthlyBudget + income, 1);
+    const expenseRatio = expenses / baseForRatios;
+    const savingRatio = savingAmount / baseForRatios;
 
     const healthScore = Math.max(
       0,
@@ -552,6 +562,8 @@ export default function DashboardPage() {
       expenses,
       fixedExpenses,
       variableExpenses,
+      expectedMonthlyBudget,
+      realCashFlow,
       available,
       savingAmount,
       pendingPayments,
@@ -573,6 +585,7 @@ export default function DashboardPage() {
     monthlyAgendaPayments,
     spaces,
     selectedMonth,
+    spaces,
   ]);
 
   const latestTransactions = monthlyTransactions.slice(0, 5);
@@ -701,8 +714,8 @@ export default function DashboardPage() {
                 </h2>
 
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-                  Dinero estimado después de restar tus pagos pendientes,
-                  pospuestos y vencidos de la Agenda de pagos.
+                  Presupuesto mensual de tus espacios + ingresos reales del
+                  periodo - gastos reales - agenda pendiente/proyectada.
                 </p>
               </div>
 
@@ -715,9 +728,9 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
+          <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-5">
             <SummaryCard
-              title="Ingresos"
+              title="Ingresos reales"
               value={moneyFormatter.format(summary.income)}
               detail="Ingresos registrados en el periodo"
               tone="success"
@@ -735,6 +748,13 @@ export default function DashboardPage() {
               value={moneyFormatter.format(summary.activeAgendaTotal)}
               detail="Pendientes, vencidos y pospuestos"
               tone="warning"
+            />
+
+            <SummaryCard
+              title="Base mensual"
+              value={moneyFormatter.format(summary.expectedMonthlyBudget)}
+              detail="Presupuesto mensual de tus espacios"
+              tone="info"
             />
 
             <SummaryCard
@@ -825,7 +845,9 @@ export default function DashboardPage() {
               <p className="mt-3 text-sm leading-6 text-slate-300">
                 Tienes{" "}
                 <strong>{moneyFormatter.format(summary.activeAgendaTotal)}</strong>{" "}
-                en pagos pendientes, vencidos o pospuestos. La IA podrá sugerir
+                en pagos pendientes, vencidos o pospuestos. Tu base mensual estimada es{" "}
+                <strong>{moneyFormatter.format(summary.expectedMonthlyBudget)}</strong>.
+                La IA podrá sugerir
                 prioridades según fechas, monto y capacidad real de pago.
               </p>
 
@@ -1062,3 +1084,4 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
+

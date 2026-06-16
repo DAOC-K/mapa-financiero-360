@@ -10,6 +10,7 @@ type PaymentStatus = "pending" | "overdue" | "paid" | "omitted" | "postponed";
 type Space = {
   id: string;
   name: string;
+  monthly_budget: number | null;
 };
 
 type PaymentItem = {
@@ -47,6 +48,13 @@ const moneyFormatter = new Intl.NumberFormat("es-CO", {
 
 function todayValue() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function getMonthlyBudgetBase(spaces: Space[]) {
+  return spaces.reduce(
+    (sum, space) => sum + Number(space.monthly_budget ?? 0),
+    0,
+  );
 }
 
 function addDays(dateValue: string | null, days: number) {
@@ -187,7 +195,7 @@ export default function PaymentsPage() {
 
     const { data: spacesData, error: spacesError } = await supabase
       .from("spaces")
-      .select("id, name")
+      .select("id, name, monthly_budget")
       .order("created_at", { ascending: false });
 
     if (spacesError) {
@@ -240,8 +248,9 @@ export default function PaymentsPage() {
       .filter((payment) => getEffectiveStatus(payment) === "omitted")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const projectedBase = 2000000;
-    const projectedAvailable = projectedBase - pending - postponed - overdue;
+    const expectedMonthlyBudget = getMonthlyBudgetBase(spaces);
+    const projectedAvailable =
+      expectedMonthlyBudget - pending - postponed - overdue;
 
     return {
       pending,
@@ -249,6 +258,7 @@ export default function PaymentsPage() {
       overdue,
       paid,
       omitted,
+      expectedMonthlyBudget,
       activeTotal: pending + postponed + overdue,
       projectedAvailable,
     };
@@ -956,3 +966,4 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
+
