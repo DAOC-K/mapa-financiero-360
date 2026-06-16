@@ -133,6 +133,48 @@ function sortAgendaPayments(items: PaymentItem[]) {
   });
 }
 
+function getCurrentMonthEndValue() {
+  const today = new Date(`${todayValue()}T00:00:00`);
+  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  return endOfMonth.toISOString().slice(0, 10);
+}
+
+function isCurrentMonthValue(dateValue: string | null) {
+  if (!dateValue) {
+    return false;
+  }
+
+  const cleanDate = dateValue.slice(0, 10);
+  const today = new Date(`${todayValue()}T00:00:00`);
+  const date = new Date(`${cleanDate}T00:00:00`);
+
+  return (
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth()
+  );
+}
+
+function isDueCurrentMonthOrPast(payment: PaymentItem) {
+  if (!payment.due_date) {
+    return true;
+  }
+
+  return payment.due_date <= getCurrentMonthEndValue();
+}
+
+function isPaymentAccountedThisMonth(payment: PaymentItem) {
+  const effectiveStatus = getEffectiveStatus(payment);
+
+  if (effectiveStatus === "paid") {
+    return isCurrentMonthValue(payment.paid_at ?? payment.due_date);
+  }
+
+  if (effectiveStatus === "omitted") {
+    return isCurrentMonthValue(payment.due_date ?? payment.updated_at);
+  }
+
+  return isDueCurrentMonthOrPast(payment);
+}
 export default function PaymentsPage() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -222,23 +264,25 @@ export default function PaymentsPage() {
   }
 
   const summary = useMemo(() => {
-    const pending = payments
+    const monthPayments = payments.filter(isPaymentAccountedThisMonth);
+
+    const pending = monthPayments
       .filter((payment) => getEffectiveStatus(payment) === "pending")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const postponed = payments
+    const postponed = monthPayments
       .filter((payment) => getEffectiveStatus(payment) === "postponed")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const overdue = payments
+    const overdue = monthPayments
       .filter((payment) => getEffectiveStatus(payment) === "overdue")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const paid = payments
+    const paid = monthPayments
       .filter((payment) => getEffectiveStatus(payment) === "paid")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-    const omitted = payments
+    const omitted = monthPayments
       .filter((payment) => getEffectiveStatus(payment) === "omitted")
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
 
@@ -678,7 +722,7 @@ export default function PaymentsPage() {
           <SummaryCard
             title="Pagado"
             value={moneyFormatter.format(summary.paid)}
-            detail="Pagos confirmados"
+            detail="Pagos confirmados este mes"
             tone="success"
           />
 
@@ -702,12 +746,12 @@ export default function PaymentsPage() {
           </p>
 
           <h2 className="mt-3 text-2xl font-bold">
-            Tienes {moneyFormatter.format(summary.activeTotal)} por cubrir.
+            Tienes {moneyFormatter.format(summary.activeTotal)} por cubrir este mes.
           </h2>
 
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-            Los pagos pendientes y vencidos siguen descontando de tu disponible
-            proyectado hasta que los marques como pagados, los pospongas, los
+            Los pagos pendientes, pospuestos y vencidos del mes actual siguen descontando
+            de tu disponible proyectado hasta que los marques como pagados, los
             edites, los omitas este mes o los elimines.
           </p>
         </section>
@@ -1210,6 +1254,7 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
+
 
 
 
