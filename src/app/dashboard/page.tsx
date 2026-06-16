@@ -240,8 +240,8 @@ export default function DashboardPage() {
 
   return (
     <SimplePage
-      title="Dashboard"
-      description="Resumen general de tus ingresos, gastos, metas, aportes y decisiones del mes."
+      title="Inicio"
+      description="Resumen de tu dinero, movimientos, metas, pagos y recomendaciones para tomar mejores decisiones financieras."
     >
       {message && (
         <section className="mb-6 rounded-3xl border border-white/10 bg-slate-900 p-6">
@@ -251,7 +251,7 @@ export default function DashboardPage() {
 
       {isLoading ? (
         <section className="rounded-3xl border border-white/10 bg-slate-900 p-6">
-          <p className="text-slate-400">Cargando dashboard desde Supabase...</p>
+          <p className="text-slate-400">Cargando inicio desde Supabase...</p>
         </section>
       ) : (
         <div className="grid gap-6">
@@ -282,15 +282,15 @@ export default function DashboardPage() {
           <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
             <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
               <p className="text-sm font-medium text-slate-400">
-                Mapas financieros
+                Espacios financieros
               </p>
               <h2 className="mt-2 text-2xl font-bold">
-                Presupuesto compartido
+                Resumen de espacios
               </h2>
 
               <div className="mt-6 grid gap-4 xl:grid-cols-3">
                 <div className="rounded-2xl bg-slate-950 p-5">
-                  <p className="text-sm text-slate-400">Mapas creados</p>
+                  <p className="text-sm text-slate-400">Espacios creados</p>
                   <p className="mt-2 text-2xl font-bold">
                     {summary.spacesCount}
                   </p>
@@ -332,9 +332,9 @@ export default function DashboardPage() {
           <section className="grid gap-6 xl:grid-cols-2">
             <article className="rounded-3xl border border-white/10 bg-slate-900 p-6">
               <p className="text-sm font-medium text-slate-400">
-                Decisión del mes
+                Plan del mes
               </p>
-              <h2 className="mt-2 text-2xl font-bold">Distribución actual</h2>
+              <h2 className="mt-2 text-2xl font-bold">Dinero asignado</h2>
 
               <div className="mt-6 grid gap-4 md:grid-cols-2">
                 <div className="rounded-2xl bg-slate-950 p-5">
@@ -361,7 +361,7 @@ export default function DashboardPage() {
               <div className="mt-6 space-y-3">
                 {latestDecisionItems.length === 0 ? (
                   <p className="rounded-2xl bg-slate-950 p-4 text-sm text-slate-400">
-                    Aún no tienes decisiones registradas.
+                    Aún no tienes asignaciones registradas.
                   </p>
                 ) : (
                   latestDecisionItems.map((item) => (
@@ -549,3 +549,4 @@ function FlowBar({
     </div>
   );
 }
+

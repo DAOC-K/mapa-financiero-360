@@ -155,7 +155,7 @@ export default function SpacesPage() {
     setType("personal");
     setAmount("");
     setDescription("");
-    setMessage("Mapa financiero creado correctamente.");
+    setMessage("Espacio financiero creado correctamente.");
   }
 
   async function removeSpace(id: string) {
@@ -169,7 +169,7 @@ export default function SpacesPage() {
     }
 
     setSpaces((current) => current.filter((space) => space.id !== id));
-    setMessage("Mapa eliminado correctamente.");
+    setMessage("Espacio eliminado correctamente.");
   }
 
   async function sendInvitation(space: Space) {
@@ -205,7 +205,7 @@ export default function SpacesPage() {
 
     if (error) {
       if (error.message.includes("duplicate key")) {
-        setMessage("Esa persona ya tiene una invitación para este mapa.");
+        setMessage("Esa persona ya tiene una invitación para este espacio.");
         return;
       }
 
@@ -253,7 +253,7 @@ export default function SpacesPage() {
       return;
     }
 
-    setMessage(`Te uniste al mapa ${invitation.space_name}.`);
+    setMessage(`Te uniste al espacio ${invitation.space_name}.`);
     await loadData();
   }
 
@@ -283,14 +283,14 @@ export default function SpacesPage() {
 
   return (
     <SimplePage
-      title="Mapas financieros"
-      description="Crea espacios personales o compartidos para organizar el flujo de dinero de cada mes."
+      title="Espacios financieros"
+      description="Organiza tu dinero por contexto: personal, hogar, pareja o negocio."
     >
       {invitations.length > 0 && (
         <section className="mb-8 rounded-3xl border border-emerald-400/30 bg-emerald-400/10 p-6">
           <h2 className="text-2xl font-bold">Invitaciones pendientes</h2>
           <p className="mt-2 text-sm text-slate-300">
-            Tienes mapas compartidos esperando tu aprobación.
+            Tienes espacios compartidos esperando tu aprobación.
           </p>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -299,7 +299,7 @@ export default function SpacesPage() {
                 key={invitation.id}
                 className="rounded-3xl border border-white/10 bg-slate-950 p-5"
               >
-                <p className="text-sm text-slate-400">Mapa compartido</p>
+                <p className="text-sm text-slate-400">Espacio compartido</p>
                 <h3 className="mt-2 text-xl font-bold">
                   {invitation.space_name}
                 </h3>
@@ -337,9 +337,9 @@ export default function SpacesPage() {
       >
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-2xl font-bold">Crear mapa financiero</h2>
+            <h2 className="text-2xl font-bold">Crear espacio financiero</h2>
             <p className="mt-2 text-sm text-slate-400">
-              Los mapas se guardan en Supabase y pueden compartirse por invitación.
+              Los espacios se guardan en Supabase y pueden compartirse por invitación.
             </p>
           </div>
 
@@ -349,16 +349,16 @@ export default function SpacesPage() {
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <Field label="Nombre del mapa">
+          <Field label="Nombre del espacio">
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Ej: Mi mapa personal, hogar, pareja"
+              placeholder="Ej: Personal, hogar, pareja o negocio"
               className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
             />
           </Field>
 
-          <Field label="Tipo de mapa">
+          <Field label="Tipo de espacio">
             <select
               value={type}
               onChange={(event) => setType(event.target.value as SpaceType)}
@@ -384,7 +384,7 @@ export default function SpacesPage() {
             <input
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="Ej: Mapa para gastos del hogar"
+              placeholder="Ej: Espacio para gastos del hogar"
               className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-400"
             />
           </Field>
@@ -401,19 +401,19 @@ export default function SpacesPage() {
           disabled={isSaving}
           className="mt-6 rounded-full bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isSaving ? "Guardando..." : "Guardar mapa"}
+          {isSaving ? "Guardando..." : "Guardar espacio"}
         </button>
       </form>
 
       {isLoading ? (
         <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900 p-6">
-          <p className="text-slate-400">Cargando mapas financieros...</p>
+          <p className="text-slate-400">Cargando espacios financieros...</p>
         </section>
       ) : spaces.length === 0 ? (
         <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900 p-6">
-          <h2 className="text-2xl font-bold">Aún no tienes mapas</h2>
+          <h2 className="text-2xl font-bold">Aún no tienes espacios</h2>
           <p className="mt-2 text-sm text-slate-400">
-            Crea tu primer mapa personal o acepta una invitación compartida.
+            Crea tu primer espacio personal o acepta una invitación compartida.
           </p>
         </section>
       ) : (
@@ -468,7 +468,7 @@ export default function SpacesPage() {
                     Invitar persona
                   </p>
                   <p className="mt-1 text-xs leading-5 text-slate-500">
-                    Escribe el correo de la persona que quieres sumar a este mapa.
+                    Escribe el correo de la persona que quieres sumar a este espacio.
                   </p>
 
                   <div className="mt-4 flex flex-col gap-3 sm:flex-row">
@@ -520,3 +520,4 @@ function Field({
     </label>
   );
 }
+
