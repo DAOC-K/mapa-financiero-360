@@ -11,7 +11,7 @@ const navItems = [
   { href: "/dashboard", label: "Inicio", shortLabel: "Inicio" },
   { href: "/transactions", label: "Movimientos", shortLabel: "Mov." },
   { href: "/payments", label: "Pagos del mes", shortLabel: "Pagos" },
-  { href: "/goals", label: "Metas", shortLabel: "Metas" },
+  { href: "/assistant", label: "Asistente IA", shortLabel: "IA" },
   { href: "/settings", label: "Más", shortLabel: "Más" },
 ];
 
@@ -269,3 +269,4 @@ function SessionBox({
     </div>
   );
 }
+
