@@ -539,8 +539,15 @@ export default function PaymentsPage() {
       "Pago omitido este mes.",
     );
   }
-
   async function deletePayment(id: string) {
+    const confirmDelete = window.confirm(
+      "¿Seguro que quieres eliminar este pago? Esta acción no se puede deshacer.",
+    );
+
+    if (!confirmDelete) {
+      return;
+    }
+
     setIsUpdating(id);
     setMessage("");
 
@@ -554,6 +561,11 @@ export default function PaymentsPage() {
     }
 
     setPayments((current) => current.filter((payment) => payment.id !== id));
+
+    if (editingPaymentId === id) {
+      cancelEditingPayment();
+    }
+
     setMessage("Pago eliminado correctamente.");
   }
 
@@ -1113,5 +1125,6 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
+
 
 
