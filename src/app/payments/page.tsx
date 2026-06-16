@@ -701,10 +701,6 @@ function PaymentCard({
 }) {
   const effectiveStatus = getEffectiveStatus(payment);
 
-  const isPaid = effectiveStatus === "paid";
-  const isOmitted = effectiveStatus === "omitted";
-  const canAct = !isPaid && !isOmitted;
-
   return (
     <div className="rounded-3xl border border-white/10 bg-slate-950 p-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -712,6 +708,16 @@ function PaymentCard({
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-lg font-bold">{payment.name}</h3>
             <StatusBadge status={effectiveStatus} />
+
+            {payment.payment_kind === "recurrent" &&
+  effectiveStatus === "pending" &&
+  payment.due_date &&
+  payment.due_date > todayValue() && (
+    <span className="rounded-full bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-300">
+      Próximo mes
+    </span>
+  )}
+  
           </div>
 
           <p className="mt-2 text-sm text-slate-400">
@@ -749,20 +755,38 @@ function PaymentCard({
         </p>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        {isPaid && (
-          <div className="rounded-full bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-300">
-            Pago confirmado
-          </div>
-        )}
+         <div className="mt-5 flex flex-wrap gap-2">
+        {effectiveStatus === "paid" ? (
+          <>
+            <div className="rounded-full bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-300">
+              Pago confirmado
+            </div>
 
-        {isOmitted && (
-          <div className="rounded-full bg-slate-400/10 px-4 py-2 text-xs font-semibold text-slate-300">
-            Omitido este mes
-          </div>
-        )}
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={isUpdating}
+              className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Eliminar
+            </button>
+          </>
+        ) : effectiveStatus === "omitted" ? (
+          <>
+            <div className="rounded-full bg-slate-400/10 px-4 py-2 text-xs font-semibold text-slate-300">
+              Omitido este mes
+            </div>
 
-        {canAct && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={isUpdating}
+              className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Eliminar
+            </button>
+          </>
+        ) : (
           <>
             <button
               type="button"
@@ -790,17 +814,17 @@ function PaymentCard({
             >
               Omitir este mes
             </button>
+
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={isUpdating}
+              className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Eliminar
+            </button>
           </>
         )}
-
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={isUpdating}
-          className="rounded-full border border-red-400/30 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          Eliminar
-        </button>
       </div>
     </div>
   );
@@ -870,4 +894,3 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
-
