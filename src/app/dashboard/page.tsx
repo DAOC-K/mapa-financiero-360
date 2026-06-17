@@ -88,6 +88,30 @@ type AgendaPaymentItem = PaymentItem & {
   projected_month?: string;
 };
 
+type IncomeKind = "recurrent" | "temporary" | "single";
+type IncomeStatus = "expected" | "received" | "omitted";
+
+type IncomeItem = {
+  id: string;
+  space_id: string;
+  user_id: string;
+  name: string;
+  amount: number;
+  category: string;
+  income_kind: IncomeKind;
+  status: IncomeStatus;
+  expected_date: string | null;
+  received_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type MonthlyIncomeItem = IncomeItem & {
+  is_projected?: boolean;
+  source_income_id?: string;
+  projected_month?: string;
+};
 const moneyFormatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
   currency: "COP",
@@ -306,6 +330,140 @@ function buildMonthlyDashboardAgendaPayments(
     ...projectedPayments,
   ]);
 }
+function isIncomeSelectedMonthValue(dateValue: string | null, monthValue: string) {
+  if (!dateValue) {
+    return false;
+  }
+
+  return dateValue.slice(0, 7) === monthValue;
+}
+
+function isIncomeAccountedInMonthForBudget(
+  income: IncomeItem,
+  monthValue: string,
+) {
+  if (income.status === "received") {
+    return isIncomeSelectedMonthValue(income.received_at, monthValue);
+  }
+
+  if (income.status === "omitted") {
+    return isIncomeSelectedMonthValue(
+      income.expected_date ?? income.updated_at,
+      monthValue,
+    );
+  }
+
+  return isIncomeSelectedMonthValue(income.expected_date, monthValue);
+}
+
+function getIncomeSeriesKeyForBudget(income: IncomeItem) {
+  return [
+    income.space_id,
+    income.name.trim().toLowerCase(),
+    income.category.trim().toLowerCase(),
+  ].join("|");
+}
+
+function getProjectedIncomeDateForBudget(
+  income: IncomeItem,
+  monthValue: string,
+) {
+  const [year, month] = monthValue.split("-").map(Number);
+  const originalDay = income.expected_date
+    ? Number(income.expected_date.slice(8, 10))
+    : 1;
+
+  const lastDayOfSelectedMonth = new Date(year, month, 0).getDate();
+  const safeDay = Math.min(originalDay || 1, lastDayOfSelectedMonth);
+
+  return `${monthValue}-${String(safeDay).padStart(2, "0")}`;
+}
+
+function buildMonthlyIncomeItemsForBudget(
+  incomes: IncomeItem[],
+  monthValue: string,
+): MonthlyIncomeItem[] {
+  const actualMonthIncomes = incomes.filter((income) =>
+    isIncomeAccountedInMonthForBudget(income, monthValue),
+  );
+
+  const actualRecurrentKeys = new Set(
+    actualMonthIncomes
+      .filter((income) => income.income_kind === "recurrent")
+      .map(getIncomeSeriesKeyForBudget),
+  );
+
+  const recurrentTemplateByKey = new Map<string, IncomeItem>();
+  const recurrentFirstMonthByKey = new Map<string, string>();
+
+  for (const income of incomes) {
+    if (income.income_kind !== "recurrent") {
+      continue;
+    }
+
+    const key = getIncomeSeriesKeyForBudget(income);
+    const incomeMonth =
+      income.expected_date?.slice(0, 7) ?? income.created_at.slice(0, 7);
+
+    const currentFirstMonth = recurrentFirstMonthByKey.get(key);
+
+    if (!currentFirstMonth || incomeMonth < currentFirstMonth) {
+      recurrentFirstMonthByKey.set(key, incomeMonth);
+    }
+
+    const currentTemplate = recurrentTemplateByKey.get(key);
+
+    if (!currentTemplate) {
+      recurrentTemplateByKey.set(key, income);
+      continue;
+    }
+
+    const incomeDate = income.expected_date ?? "";
+    const templateDate = currentTemplate.expected_date ?? "";
+
+    if (
+      income.updated_at > currentTemplate.updated_at ||
+      incomeDate > templateDate
+    ) {
+      recurrentTemplateByKey.set(key, income);
+    }
+  }
+
+  const projectedIncomes: MonthlyIncomeItem[] = [];
+
+  for (const [key, template] of recurrentTemplateByKey.entries()) {
+    const firstMonth = recurrentFirstMonthByKey.get(key);
+
+    if (actualRecurrentKeys.has(key)) {
+      continue;
+    }
+
+    if (firstMonth && monthValue < firstMonth) {
+      continue;
+    }
+
+    projectedIncomes.push({
+      ...template,
+      id: `projected-income-${key}-${monthValue}`,
+      status: "expected",
+      expected_date: getProjectedIncomeDateForBudget(template, monthValue),
+      received_at: null,
+      created_at: `${monthValue}-01T00:00:00.000Z`,
+      updated_at: template.updated_at,
+      is_projected: true,
+      source_income_id: template.id,
+      projected_month: monthValue,
+    });
+  }
+
+  return [...actualMonthIncomes, ...projectedIncomes];
+}
+
+function getExpectedIncomeBase(monthlyIncomes: MonthlyIncomeItem[]) {
+  return monthlyIncomes
+    .filter((income) => income.status === "expected" || income.status === "received")
+    .reduce((sum, income) => sum + Number(income.amount), 0);
+}
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -317,6 +475,7 @@ export default function DashboardPage() {
   );
   const [decisionItems, setDecisionItems] = useState<DecisionItem[]>([]);
   const [payments, setPayments] = useState<PaymentItem[]>([]);
+  const [incomes, setIncomes] = useState<IncomeItem[]>([]);
 
   const [selectedMonth, setSelectedMonth] = useState(getMonthInputValue());
   const [isLoading, setIsLoading] = useState(true);
@@ -408,7 +567,19 @@ export default function DashboardPage() {
       setGoals(goalsData ?? []);
       setMonthlyDecisions(decisionsData ?? []);
       setDecisionItems(itemsData);
+      const { data: incomesData, error: incomesError } = await supabase
+        .from("income_items")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (incomesError) {
+        setMessage(incomesError.message);
+        setIsLoading(false);
+        return;
+      }
+
       setPayments((paymentsData ?? []) as PaymentItem[]);
+      setIncomes((incomesData ?? []) as IncomeItem[]);
       setIsLoading(false);
     }
 
@@ -426,6 +597,11 @@ export default function DashboardPage() {
   const monthlyAgendaPayments = useMemo(
     () => buildMonthlyDashboardAgendaPayments(payments, selectedMonth),
     [payments, selectedMonth],
+  );
+
+  const monthlyIncomeItems = useMemo(
+    () => buildMonthlyIncomeItemsForBudget(incomes, selectedMonth),
+    [incomes, selectedMonth],
   );
 
   const selectedMonthParts = useMemo(() => {
@@ -494,8 +670,11 @@ export default function DashboardPage() {
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
     const expectedMonthlyBudget = getMonthlyBudgetBase(spaces);
+    const expectedIncomeBase = getExpectedIncomeBase(monthlyIncomeItems);
+    const incomeBase =
+      expectedIncomeBase > 0 ? expectedIncomeBase : expectedMonthlyBudget;
     const realCashFlow = income - expenses;
-    const available = expectedMonthlyBudget + income - expenses;
+    const available = incomeBase + income - expenses;
 
     const goalSavings = goals.reduce(
       (sum, goal) => sum + Number(goal.current_amount),
@@ -539,9 +718,10 @@ export default function DashboardPage() {
     const activeAgendaTotal =
       pendingPayments + postponedPayments + overduePayments;
 
-    const projectedAfterAgenda = available - activeAgendaTotal;
+    const agendaImpactTotal = activeAgendaTotal + paidPayments;
+    const projectedAfterAgenda = available - agendaImpactTotal;
 
-    const baseForRatios = Math.max(expectedMonthlyBudget + income, 1);
+    const baseForRatios = Math.max(incomeBase + income, 1);
     const expenseRatio = expenses / baseForRatios;
     const savingRatio = savingAmount / baseForRatios;
 
@@ -563,6 +743,8 @@ export default function DashboardPage() {
       fixedExpenses,
       variableExpenses,
       expectedMonthlyBudget,
+      expectedIncomeBase,
+      incomeBase,
       realCashFlow,
       available,
       savingAmount,
@@ -571,6 +753,7 @@ export default function DashboardPage() {
       overduePayments,
       paidPayments,
       activeAgendaTotal,
+      agendaImpactTotal,
       projectedAfterAgenda,
       healthScore,
       goalsCount: goals.length,
@@ -583,6 +766,7 @@ export default function DashboardPage() {
     monthlyDecisions,
     decisionItems,
     monthlyAgendaPayments,
+    monthlyIncomeItems,
     spaces,
     selectedMonth,
     spaces,
@@ -714,8 +898,8 @@ export default function DashboardPage() {
                 </h2>
 
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-                  Presupuesto mensual de tus espacios + ingresos reales del
-                  periodo - gastos reales - agenda pendiente/proyectada.
+                  Ingresos esperados del periodo + ingresos reales registrados
+                  - gastos reales - pagos de agenda pagados o pendientes.
                 </p>
               </div>
 
@@ -751,9 +935,13 @@ export default function DashboardPage() {
             />
 
             <SummaryCard
-              title="Base mensual"
-              value={moneyFormatter.format(summary.expectedMonthlyBudget)}
-              detail="Presupuesto mensual de tus espacios"
+              title="Base de ingresos"
+              value={moneyFormatter.format(summary.incomeBase)}
+              detail={
+                summary.expectedIncomeBase > 0
+                  ? "Ingresos esperados del periodo"
+                  : "Presupuesto mensual de tus espacios"
+              }
               tone="info"
             />
 
@@ -845,7 +1033,7 @@ export default function DashboardPage() {
               <p className="mt-3 text-sm leading-6 text-slate-300">
                 Tienes{" "}
                 <strong>{moneyFormatter.format(summary.activeAgendaTotal)}</strong>{" "}
-                en pagos pendientes, vencidos o pospuestos. Tu base mensual estimada es{" "}
+                en pagos pendientes, vencidos o pospuestos. Los pagos ya confirmados también descuentan del disponible. Tu base mensual estimada es{" "}
                 <strong>{moneyFormatter.format(summary.expectedMonthlyBudget)}</strong>.
                 La IA podrá sugerir
                 prioridades según fechas, monto y capacidad real de pago.
@@ -1084,4 +1272,7 @@ function EmptyText({ text }: { text: string }) {
     </p>
   );
 }
+
+
+
 
